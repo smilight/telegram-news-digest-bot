@@ -257,12 +257,13 @@ async def send_digest(
   db.incr_metric("digests_generated", 1)
   inline_preview = bool(DIGEST_INLINE_PREVIEW)
   media_links = _media_preview_links(clusters, max_links=max(0, int(DIGEST_MEDIA_PREVIEW_MAX)))
-  if inline_preview and media_links:
+  inline_preview_active = inline_preview and bool(media_links)
+  if inline_preview_active:
     # Telegram shows preview from one link in a text message; put media link first.
     text = f"{media_links[0]}\n\n{text}"
 
   if len(text) <= 3800:
-    await bot.send_message(user_id, text, disable_web_page_preview=not inline_preview)
+    await bot.send_message(user_id, text, disable_web_page_preview=not inline_preview_active)
     return
 
   chunks, cur = [], ""
@@ -276,8 +277,9 @@ async def send_digest(
   if cur.strip():
     chunks.append(cur.strip())
 
-  for chunk in chunks:
-    await bot.send_message(user_id, chunk, disable_web_page_preview=not inline_preview)
+  for i, chunk in enumerate(chunks):
+    preview_for_chunk = inline_preview_active and i == 0
+    await bot.send_message(user_id, chunk, disable_web_page_preview=not preview_for_chunk)
 
 
 def menu_kb(hourly_on: bool, daily_on: bool, lang: str = "en", view: str = "main"):
@@ -591,6 +593,10 @@ def _menu_view_text(user_id: int, lang: str, view: str) -> str:
   return t(lang, "menu_hint")
 
 
+def _settings_result_text(user_id: int, lang: str, view: str) -> str:
+  return f"{t(lang, 'saved')}\n\n{_menu_view_text(user_id, lang, view)}"
+
+
 def _quiet_text(user_id: int, lang: str) -> str:
   sch = db.get_schedule(user_id)
   return (
@@ -697,8 +703,11 @@ def make_bot_and_dp() -> tuple[Bot, Dispatcher]:
     if scope not in ("hourly", "daily"):
       await m.answer(t(lang, "scope_format"))
       return
-    db.add_channel_for_user(m.from_user.id, ch, scope)
-    await m.answer(t(lang, "added_to_hourly" if scope == "hourly" else "added_to_daily").format(ch=f"@{ch}"))
+    inserted = db.add_channel_for_user(m.from_user.id, ch, scope)
+    if inserted:
+      await m.answer(t(lang, "added_to_hourly" if scope == "hourly" else "added_to_daily").format(ch=f"@{ch}"))
+    else:
+      await m.answer(t(lang, "already_in_hourly" if scope == "hourly" else "already_in_daily").format(ch=f"@{ch}"))
 
   @dp.message(Command("rm"))
   async def rm(m: Message, command: CommandObject):
@@ -773,7 +782,11 @@ def make_bot_and_dp() -> tuple[Bot, Dispatcher]:
       await m.answer(t(lang, "breaking_format"))
       return
     db.set_breaking(m.from_user.id, arg == "on")
-    await m.answer(f"{t(lang, 'breaking_toggle')} {t(lang, 'toggle_on') if arg == 'on' else t(lang, 'toggle_off')}")
+    hourly_on, daily_on = db.get_user_flags(m.from_user.id)
+    await m.answer(
+      _settings_result_text(m.from_user.id, lang, "breaking"),
+      reply_markup=menu_kb(hourly_on, daily_on, lang, view="breaking"),
+    )
 
   @dp.message(Command("originals"))
   async def originals_cmd(m: Message, command: CommandObject):
@@ -783,7 +796,11 @@ def make_bot_and_dp() -> tuple[Bot, Dispatcher]:
       await m.answer(t(lang, "originals_format"))
       return
     db.set_originals_only(m.from_user.id, arg == "on")
-    await m.answer(f"{t(lang, 'originals_toggle')} {t(lang, 'toggle_on') if arg == 'on' else t(lang, 'toggle_off')}")
+    hourly_on, daily_on = db.get_user_flags(m.from_user.id)
+    await m.answer(
+      _settings_result_text(m.from_user.id, lang, "settings"),
+      reply_markup=menu_kb(hourly_on, daily_on, lang, view="settings"),
+    )
 
   @dp.message(Command("kw"))
   async def kw_cmd(m: Message, command: CommandObject):
@@ -798,13 +815,15 @@ def make_bot_and_dp() -> tuple[Bot, Dispatcher]:
     mode, value = parts[0].lower(), parts[1].strip()
     if mode == "include":
       db.set_keywords(m.from_user.id, include=value)
-      await m.answer(t(lang, "include_set"))
     elif mode == "exclude":
       db.set_keywords(m.from_user.id, exclude=value)
-      await m.answer(t(lang, "exclude_set"))
     else:
       db.set_keywords(m.from_user.id, noise=value)
-      await m.answer(t(lang, "noise_set"))
+    hourly_on, daily_on = db.get_user_flags(m.from_user.id)
+    await m.answer(
+      _settings_result_text(m.from_user.id, lang, "keywords"),
+      reply_markup=menu_kb(hourly_on, daily_on, lang, view="keywords"),
+    )
 
   @dp.message(Command("set"))
   async def set_cmd(m: Message, command: CommandObject):
@@ -820,12 +839,16 @@ def make_bot_and_dp() -> tuple[Bot, Dispatcher]:
     try:
       if key == "daily_time":
         db.set_daily_time(m.from_user.id, val)
-        await m.answer(f"🗓 {t(lang, 'status_daily_time')}: {val}")
       elif key == "hourly_minute":
         db.set_hourly_minute(m.from_user.id, int(val))
-        await m.answer(f"⏱ {t(lang, 'status_hourly_min')}: {int(val):02d}")
       else:
         await m.answer(t(lang, "set_unknown"))
+        return
+      hourly_on, daily_on = db.get_user_flags(m.from_user.id)
+      await m.answer(
+        _settings_result_text(m.from_user.id, lang, "schedule"),
+        reply_markup=menu_kb(hourly_on, daily_on, lang, view="schedule"),
+      )
     except Exception as e:
       await m.answer(f"{t(lang, 'error')}: {e}")
 
@@ -843,7 +866,11 @@ def make_bot_and_dp() -> tuple[Bot, Dispatcher]:
       await m.answer(t(lang, "tz_invalid"))
       return
     db.set_timezone(m.from_user.id, arg)
-    await m.answer(f"{t(lang, 'status_timezone')}: {arg}")
+    hourly_on, daily_on = db.get_user_flags(m.from_user.id)
+    await m.answer(
+      _settings_result_text(m.from_user.id, lang, "schedule"),
+      reply_markup=menu_kb(hourly_on, daily_on, lang, view="schedule"),
+    )
 
   @dp.message(Command("quiet"))
   async def quiet_cmd(m: Message, command: CommandObject):
@@ -867,10 +894,10 @@ def make_bot_and_dp() -> tuple[Bot, Dispatcher]:
         await m.answer(t(lang, "quiet_format"))
         return
     db.set_quiet_hours(m.from_user.id, onoff == "on", start_hhmm=start, end_hhmm=end)
-    sch = db.get_schedule(m.from_user.id)
+    hourly_on, daily_on = db.get_user_flags(m.from_user.id)
     await m.answer(
-      f"{t(lang, 'status_quiet')}: {bool(sch.get('quiet_hours_enabled', 0))} "
-      f"({sch.get('quiet_start', '23:00')}–{sch.get('quiet_end', '07:00')})"
+      _settings_result_text(m.from_user.id, lang, "quiet"),
+      reply_markup=menu_kb(hourly_on, daily_on, lang, view="quiet"),
     )
 
   @dp.message(Command("topic"))
@@ -1071,7 +1098,8 @@ def make_bot_and_dp() -> tuple[Bot, Dispatcher]:
         db.set_originals_only(user_id, not bool(s.get("originals_only", 0)))
       hourly_on, daily_on = db.get_user_flags(user_id)
       view = "main" if sc in ("hourly", "daily") else ("breaking" if sc == "breaking" else "settings")
-      await q.message.answer(t(lang, "saved"), reply_markup=menu_kb(hourly_on, daily_on, lang, view=view))
+      body = t(lang, "saved") if view == "main" else _settings_result_text(user_id, lang, view)
+      await q.message.answer(body, reply_markup=menu_kb(hourly_on, daily_on, lang, view=view))
       await q.answer()
       return
 
@@ -1093,7 +1121,7 @@ def make_bot_and_dp() -> tuple[Bot, Dispatcher]:
       cur = max(2, cur + (1 if delta == "+1" else -1))
       db.set_breaking_params(user_id, sources=cur)
       await q.message.answer(
-        f"🚨 {t(lang, 'status_breaking_sources')}: {cur}",
+        _settings_result_text(user_id, lang, "breaking"),
         reply_markup=menu_kb(hourly_on, daily_on, lang, view="breaking"),
       )
       await q.answer()
@@ -1106,7 +1134,7 @@ def make_bot_and_dp() -> tuple[Bot, Dispatcher]:
       cur = max(2, cur + (1 if delta == "+1" else -1))
       db.set_breaking_params(user_id, window_min=cur)
       await q.message.answer(
-        f"⏲ {t(lang, 'status_breaking_window')}: {cur}",
+        _settings_result_text(user_id, lang, "breaking"),
         reply_markup=menu_kb(hourly_on, daily_on, lang, view="breaking"),
       )
       await q.answer()
@@ -1119,7 +1147,7 @@ def make_bot_and_dp() -> tuple[Bot, Dispatcher]:
       cur = (cur + 1) % 60 if delta == "+1" else (cur - 1) % 60
       db.set_hourly_minute(user_id, cur)
       await q.message.answer(
-        f"⏱ {t(lang, 'status_hourly_min')}: {cur:02d}",
+        _settings_result_text(user_id, lang, "schedule"),
         reply_markup=menu_kb(hourly_on, daily_on, lang, view="schedule"),
       )
       await q.answer()
@@ -1150,19 +1178,22 @@ def make_bot_and_dp() -> tuple[Bot, Dispatcher]:
       return
 
     if data == "kw:help":
-      await q.message.answer(t(lang, "kw_help_text"), reply_markup=menu_kb(hourly_on, daily_on, lang, view="keywords"))
+      await q.message.answer(
+        t(lang, "kw_help_text") + "\n\n" + _menu_view_text(user_id, lang, "keywords"),
+        reply_markup=menu_kb(hourly_on, daily_on, lang, view="keywords"),
+      )
       await q.answer()
       return
 
     if data == "quiet:on":
       db.set_quiet_hours(user_id, True)
-      await q.message.answer(_quiet_text(user_id, lang), reply_markup=menu_kb(hourly_on, daily_on, lang, view="quiet"))
+      await q.message.answer(_settings_result_text(user_id, lang, "quiet"), reply_markup=menu_kb(hourly_on, daily_on, lang, view="quiet"))
       await q.answer()
       return
 
     if data == "quiet:off":
       db.set_quiet_hours(user_id, False)
-      await q.message.answer(_quiet_text(user_id, lang), reply_markup=menu_kb(hourly_on, daily_on, lang, view="quiet"))
+      await q.message.answer(_settings_result_text(user_id, lang, "quiet"), reply_markup=menu_kb(hourly_on, daily_on, lang, view="quiet"))
       await q.answer()
       return
 
@@ -1179,7 +1210,7 @@ def make_bot_and_dp() -> tuple[Bot, Dispatcher]:
         end = f"{parts[4]}:{parts[5]}"
         if re.fullmatch(r"([01]\d|2[0-3]):([0-5]\d)", start) and re.fullmatch(r"([01]\d|2[0-3]):([0-5]\d)", end):
           db.set_quiet_hours(user_id, True, start_hhmm=start, end_hhmm=end)
-      await q.message.answer(_quiet_text(user_id, lang), reply_markup=menu_kb(hourly_on, daily_on, lang, view="quiet"))
+      await q.message.answer(_settings_result_text(user_id, lang, "quiet"), reply_markup=menu_kb(hourly_on, daily_on, lang, view="quiet"))
       await q.answer()
       return
 
@@ -1262,11 +1293,11 @@ def make_bot_and_dp() -> tuple[Bot, Dispatcher]:
     if not ch:
       await m.answer(t(lang, "invalid_channel"))
       return
-    db.add_channel_for_user(m.from_user.id, ch, "hourly")
+    inserted = db.add_channel_for_user(m.from_user.id, ch, "hourly")
     await state.clear()
     hourly_on, daily_on = db.get_user_flags(m.from_user.id)
     await m.answer(
-      t(lang, "added_to_hourly").format(ch=f"@{ch}"),
+      (t(lang, "added_to_hourly") if inserted else t(lang, "already_in_hourly")).format(ch=f"@{ch}"),
       reply_markup=menu_kb(hourly_on, daily_on, lang, view="channels"),
     )
 
@@ -1277,11 +1308,11 @@ def make_bot_and_dp() -> tuple[Bot, Dispatcher]:
     if not ch:
       await m.answer(t(lang, "invalid_channel"))
       return
-    db.add_channel_for_user(m.from_user.id, ch, "daily")
+    inserted = db.add_channel_for_user(m.from_user.id, ch, "daily")
     await state.clear()
     hourly_on, daily_on = db.get_user_flags(m.from_user.id)
     await m.answer(
-      t(lang, "added_to_daily").format(ch=f"@{ch}"),
+      (t(lang, "added_to_daily") if inserted else t(lang, "already_in_daily")).format(ch=f"@{ch}"),
       reply_markup=menu_kb(hourly_on, daily_on, lang, view="channels"),
     )
 
@@ -1324,11 +1355,11 @@ def make_bot_and_dp() -> tuple[Bot, Dispatcher]:
     if not ch:
       await m.answer(t(lang, "invalid_channel"))
       return
-    db.add_monitor_channel(m.from_user.id, ch)
+    inserted = db.add_monitor_channel(m.from_user.id, ch)
     await state.clear()
     hourly_on, daily_on = db.get_user_flags(m.from_user.id)
     await m.answer(
-      t(lang, "added_to_monitor").format(ch=f"@{ch}"),
+      (t(lang, "added_to_monitor") if inserted else t(lang, "already_in_monitor")).format(ch=f"@{ch}"),
       reply_markup=menu_kb(hourly_on, daily_on, lang, view="monitor"),
     )
 
@@ -1360,7 +1391,7 @@ def make_bot_and_dp() -> tuple[Bot, Dispatcher]:
     await state.clear()
     hourly_on, daily_on = db.get_user_flags(m.from_user.id)
     await m.answer(
-      f"🗓 {t(lang, 'status_daily_time')}: {txt}",
+      _settings_result_text(m.from_user.id, lang, "schedule"),
       reply_markup=menu_kb(hourly_on, daily_on, lang, view="schedule"),
     )
 
@@ -1371,7 +1402,7 @@ def make_bot_and_dp() -> tuple[Bot, Dispatcher]:
     db.set_keywords(m.from_user.id, include=txt if txt else "")
     await state.clear()
     hourly_on, daily_on = db.get_user_flags(m.from_user.id)
-    await m.answer(t(lang, "include_set"), reply_markup=menu_kb(hourly_on, daily_on, lang, view="keywords"))
+    await m.answer(_settings_result_text(m.from_user.id, lang, "keywords"), reply_markup=menu_kb(hourly_on, daily_on, lang, view="keywords"))
 
   @dp.message(AddRemoveFlow.waiting_exclude_kw)
   async def set_exc_kw_flow(m: Message, state: FSMContext):
@@ -1380,7 +1411,7 @@ def make_bot_and_dp() -> tuple[Bot, Dispatcher]:
     db.set_keywords(m.from_user.id, exclude=txt if txt else "")
     await state.clear()
     hourly_on, daily_on = db.get_user_flags(m.from_user.id)
-    await m.answer(t(lang, "exclude_set"), reply_markup=menu_kb(hourly_on, daily_on, lang, view="keywords"))
+    await m.answer(_settings_result_text(m.from_user.id, lang, "keywords"), reply_markup=menu_kb(hourly_on, daily_on, lang, view="keywords"))
 
   @dp.message(AddRemoveFlow.waiting_noise_kw)
   async def set_noise_kw_flow(m: Message, state: FSMContext):
@@ -1389,7 +1420,7 @@ def make_bot_and_dp() -> tuple[Bot, Dispatcher]:
     db.set_keywords(m.from_user.id, noise=txt if txt else "")
     await state.clear()
     hourly_on, daily_on = db.get_user_flags(m.from_user.id)
-    await m.answer(t(lang, "noise_set"), reply_markup=menu_kb(hourly_on, daily_on, lang, view="keywords"))
+    await m.answer(_settings_result_text(m.from_user.id, lang, "keywords"), reply_markup=menu_kb(hourly_on, daily_on, lang, view="keywords"))
 
   @dp.message(AddRemoveFlow.waiting_quiet_range)
   async def set_quiet_range_flow(m: Message, state: FSMContext):
@@ -1406,7 +1437,7 @@ def make_bot_and_dp() -> tuple[Bot, Dispatcher]:
     db.set_quiet_hours(m.from_user.id, True, start_hhmm=start, end_hhmm=end)
     await state.clear()
     hourly_on, daily_on = db.get_user_flags(m.from_user.id)
-    await m.answer(_quiet_text(m.from_user.id, lang), reply_markup=menu_kb(hourly_on, daily_on, lang, view="quiet"))
+    await m.answer(_settings_result_text(m.from_user.id, lang, "quiet"), reply_markup=menu_kb(hourly_on, daily_on, lang, view="quiet"))
 
   @dp.message()
   async def fallback(m: Message):

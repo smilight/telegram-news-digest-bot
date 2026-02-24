@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 import hashlib
+import logging
 import os
 from zoneinfo import ZoneInfo
 
@@ -17,6 +18,7 @@ from .semantic import DEDUP_MODE, embed_texts, similarity
 TZ = os.getenv("TZ", "UTC")
 DB_RETENTION_DAYS = int(os.getenv("DB_RETENTION_DAYS", "60"))
 DB_CLEANUP_EVERY_MIN = int(os.getenv("DB_CLEANUP_EVERY_MIN", "60"))
+logger = logging.getLogger(__name__)
 
 
 def _now_local() -> dt.datetime:
@@ -65,13 +67,19 @@ def _daily_time_reached(local_now: dt.datetime, hhmm: str) -> bool:
     return local_now.hour >= 9
 
 
-def _parse_slot_utc(slot: str | None) -> dt.datetime | None:
+def _parse_slot_utc(slot: str | None, timezone_name: str = "UTC") -> dt.datetime | None:
   if not slot:
     return None
   try:
     s = str(slot)
     if len(s) == 16:
-      return dt.datetime.fromisoformat(s).replace(tzinfo=dt.timezone.utc)
+      # Backward compatibility: old slot format had no timezone and was local user time.
+      naive = dt.datetime.fromisoformat(s)
+      try:
+        local = naive.replace(tzinfo=ZoneInfo(timezone_name))
+        return local.astimezone(dt.timezone.utc)
+      except Exception:
+        return naive.replace(tzinfo=dt.timezone.utc)
     return dt.datetime.fromisoformat(s.replace("Z", "+00:00")).astimezone(dt.timezone.utc)
   except Exception:
     return None
@@ -215,6 +223,7 @@ def setup_scheduler(bot):
         db.mark_hourly_sent(uid, hour_key)
         db.incr_metric("digests_hourly_sent", 1)
       except Exception:
+        logger.exception("Hourly digest tick failed for uid=%s", uid)
         continue
 
     for uid in db.list_users_with_flag("daily_enabled"):
@@ -233,6 +242,7 @@ def setup_scheduler(bot):
         db.mark_daily_sent(uid, today_key)
         db.incr_metric("digests_daily_sent", 1)
       except Exception:
+        logger.exception("Daily digest tick failed for uid=%s", uid)
         continue
 
     for uid in db.list_users_monitoring_enabled():
@@ -251,12 +261,13 @@ def setup_scheduler(bot):
             pass
         interval = max(1, min(30, int(s.get("monitor_interval_min", 2))))
         now_utc_min = dt.datetime.now(dt.timezone.utc).replace(second=0, microsecond=0)
-        last_slot = _parse_slot_utc(s.get("monitor_last_slot"))
+        last_slot = _parse_slot_utc(s.get("monitor_last_slot"), timezone_name=str(s.get("timezone", "UTC")))
         if last_slot and (now_utc_min - last_slot).total_seconds() < interval * 60:
           continue
         await monitoring.send_monitoring_summary(bot, uid, period_min=interval, force=False)
         db.mark_monitor_slot(uid, now_utc_min.strftime("%Y-%m-%dT%H:%M:%SZ"))
       except Exception:
+        logger.exception("Monitoring tick failed for uid=%s", uid)
         continue
 
     try:
@@ -266,11 +277,13 @@ def setup_scheduler(bot):
         db.cleanup_old_data(max(1, int(DB_RETENTION_DAYS)))
         last_cleanup_at = now_utc
     except Exception:
+      logger.exception("DB cleanup tick failed")
       pass
 
     try:
       await _run_breaking(bot)
     except Exception:
+      logger.exception("Breaking tick failed")
       pass
 
   sched.add_job(tick, "cron", second=10)

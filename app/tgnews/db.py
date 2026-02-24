@@ -309,13 +309,14 @@ def get_user_flags(user_id: int) -> Tuple[bool, bool]:
       return False, False
     return bool(row["hourly_enabled"]), bool(row["daily_enabled"])
 
-def add_channel_for_user(user_id: int, username: str, scope: str):
+def add_channel_for_user(user_id: int, username: str, scope: str) -> bool:
   username = username.lstrip("@").strip()
   scope = scope.strip().lower()
   if scope not in ("hourly", "daily"):
     raise ValueError("scope must be hourly or daily")
   with connect() as conn:
-    conn.execute("INSERT OR IGNORE INTO user_channels(user_id, username, scope) VALUES (?,?,?)", (user_id, username, scope))
+    cur = conn.execute("INSERT OR IGNORE INTO user_channels(user_id, username, scope) VALUES (?,?,?)", (user_id, username, scope))
+    return int(cur.rowcount or 0) > 0
 
 def remove_channel_for_user(user_id: int, username: str, scope: str) -> int:
   username = username.lstrip("@").strip()
@@ -779,13 +780,14 @@ def list_users_monitoring_enabled() -> List[int]:
     return [int(r["user_id"]) for r in rows]
 
 
-def add_monitor_channel(user_id: int, username: str):
+def add_monitor_channel(user_id: int, username: str) -> bool:
   username = username.lstrip("@").strip()
   with connect() as conn:
-    conn.execute(
+    cur = conn.execute(
       "INSERT OR IGNORE INTO user_monitor_channels(user_id, username) VALUES (?,?)",
       (int(user_id), username),
     )
+    return int(cur.rowcount or 0) > 0
 
 
 def remove_monitor_channel(user_id: int, username: str) -> int:

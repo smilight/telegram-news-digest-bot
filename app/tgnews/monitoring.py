@@ -194,13 +194,8 @@ def _format_period(period_min: int) -> str:
   return f"{period_min}m"
 
 
-def _short_link(link: str) -> str:
-  if not link:
-    return ""
-  s = str(link).strip()
-  if len(s) <= 56:
-    return s
-  return s[:53] + "..."
+def _link_or_empty(link: str) -> str:
+  return str(link).strip() if link else ""
 
 
 def _short_time(iso_utc: str | None) -> str:
@@ -245,7 +240,7 @@ def build_monitor_text(lang: str, events: List[Dict[str, object]], period_min: i
       cfm = f" {t(lang, 'monitor_confirmed')}" if bool(e.get("confirmed")) else ""
       tm = _short_time(str(e.get("date_utc") or ""))
       lines.append(f"• {tm} [{pr}] {_cat_title(lang, str(e['category']))} • {e['where']} • src:{e['sources_count']}{cfm}")
-      link = _short_link(str(e.get("link") or ""))
+      link = _link_or_empty(str(e.get("link") or ""))
       if link:
         lines.append(f"  {t(lang, 'monitor_more')}: {link}")
     if len(events) > 8:
@@ -269,7 +264,7 @@ def build_monitor_text(lang: str, events: List[Dict[str, object]], period_min: i
       cfm = f" {t(lang, 'monitor_confirmed')}" if bool(e.get("confirmed")) else ""
       tm = _short_time(str(e.get("date_utc") or ""))
       lines.append(f"• {tm} [{pr}] {e['where']}: {e['what']} (src:{e['sources_count']}, @{e['source']}){cfm}")
-      link = _short_link(str(e.get("link") or ""))
+      link = _link_or_empty(str(e.get("link") or ""))
       if link:
         lines.append(f"  {t(lang, 'monitor_more')}: {link}")
     lines.append("")
@@ -461,8 +456,8 @@ async def monitor_command(message: Message, args: str, parse_channel_ref):
     if not ch:
       await message.answer(t(lang, "invalid_channel"))
       return
-    db.add_monitor_channel(uid, ch)
-    await message.answer(t(lang, "added_to_monitor").format(ch='@'+ch))
+    inserted = db.add_monitor_channel(uid, ch)
+    await message.answer((t(lang, "added_to_monitor") if inserted else t(lang, "already_in_monitor")).format(ch='@'+ch))
     return
 
   if cmd == "rm" and len(parts) >= 2:

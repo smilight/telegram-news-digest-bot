@@ -30,6 +30,14 @@ def _pretty_media_tags(text: str) -> str:
     out = out.replace(k, v)
   return out
 
+
+def _is_media_only_text(text: str) -> bool:
+  t = (text or "").strip().lower()
+  if not t:
+    return False
+  tags = {k.lower() for k in MEDIA_TAGS.keys()} | {v.lower() for v in MEDIA_TAGS.values()}
+  return t in tags
+
 def first_sentence(text: str, limit: int = 220) -> str:
   t = text.strip().replace("\n", " ")
   t = " ".join(t.split())
@@ -50,10 +58,15 @@ def _cluster_simhash(posts: List[Dict], max_hamming: int = 6) -> List[Cluster]:
   clusters: List[Cluster] = []
   posts_sorted = sorted(posts, key=lambda p: p["date_utc"], reverse=True)
   for p in posts_sorted:
+    p_media_only = _is_media_only_text(str(p.get("text", "")))
     placed = False
     for c in clusters:
+      c_media_only = _is_media_only_text(str(c.rep.get("text", "")))
       if p["norm_hash"] == c.rep["norm_hash"]:
         c.items.append(p); placed = True; break
+      # Avoid fuzzy merging for media-only posts (photo/video-only messages).
+      if p_media_only or c_media_only:
+        continue
       if hamming(int(p["simhash"]), int(c.rep["simhash"])) <= max_hamming:
         c.items.append(p); placed = True; break
     if not placed:
