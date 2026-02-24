@@ -24,14 +24,12 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from . import db
 from . import monitoring
-from .digest import cluster_posts, format_digest, rank_clusters
+from .digest import cluster_posts, format_digest
 from .i18n import norm_lang, t
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 DIGEST_TOPK_HOURLY = int(os.getenv("DIGEST_TOPK_HOURLY", "8"))
 DIGEST_TOPK_DAILY = int(os.getenv("DIGEST_TOPK_DAILY", "15"))
-DIGEST_MEDIA_PREVIEW_MAX = int(os.getenv("DIGEST_MEDIA_PREVIEW_MAX", "3"))
-DIGEST_INLINE_PREVIEW = int(os.getenv("DIGEST_INLINE_PREVIEW", "1"))
 
 RE_CH = re.compile(r"@?([A-Za-z0-9_]{4,32})")
 RE_CH_FULL = re.compile(r"^@?([A-Za-z0-9_]{4,32})$")
@@ -126,6 +124,13 @@ def parse_channel_ref(raw: str | None) -> str | None:
 
 def _ensure_user_and_lang(user_id: int, tg_lang: str | None = None) -> str:
   created = db.ensure_user(user_id)
+  default_tz = os.getenv("TZ", "UTC")
+  if created and default_tz and default_tz != "UTC":
+    try:
+      ZoneInfo(default_tz)
+      db.set_timezone(user_id, default_tz)
+    except Exception:
+      pass
   if created and tg_lang:
     db.set_lang(user_id, norm_lang(tg_lang))
   return db.get_lang(user_id)
@@ -159,35 +164,35 @@ def _scope_title(lang: str, scope: str) -> str:
   return t(lang, "scope_all")
 
 
-def _contains_media_marker(text: str) -> bool:
-  low = (text or "").lower()
-  markers = (
+def _fmt_utc_human(raw: str | None, tzname: str) -> str:
+  s = str(raw or "").strip()
+  if not s:
+    return "—"
+  try:
+    if "T" in s:
+      d = dt.datetime.fromisoformat(s.replace("Z", "+00:00"))
+    else:
+      # SQLite datetime('now') format
+      d = dt.datetime.fromisoformat(s.replace(" ", "T") + "+00:00")
+    return d.astimezone(ZoneInfo(tzname)).strftime("%d.%m %H:%M")
+  except Exception:
+    return s
+
+
+def _strip_media_only(text: str) -> str:
+  tags = {
     "[photo]", "[video]", "[voice]", "[audio]", "[sticker]", "[document]", "[media]",
     "📷 photo", "🎬 video", "🎤 voice", "🎵 audio", "🧩 sticker", "📄 document", "📎 media",
-  )
-  return any(m in low for m in markers)
-
-
-def _media_preview_links(clusters, max_links: int) -> list[str]:
-  links: list[str] = []
-  seen = set()
-  ordered = rank_clusters(list(clusters))
-  for c in ordered:
-    picked = None
-    for it in c.items:
-      txt = str(it.get("text") or "")
-      link = str(it.get("link") or "")
-      if not link or link in seen:
-        continue
-      if _contains_media_marker(txt):
-        picked = link
-        break
-    if picked:
-      seen.add(picked)
-      links.append(picked)
-      if len(links) >= max_links:
-        break
-  return links
+  }
+  out = []
+  for ln in str(text or "").splitlines():
+    s = ln.strip()
+    if not s:
+      continue
+    if s.lower() in tags:
+      continue
+    out.append(s)
+  return "\n".join(out)
 
 
 async def send_digest(
@@ -229,6 +234,10 @@ async def send_digest(
     posts = [p for p in posts if not _match_any(p.get("text", ""), exc)]
   if noise:
     posts = [p for p in posts if not _match_any(p.get("text", ""), noise)]
+  # Hide media-only items from digest if they don't have textual content.
+  for p in posts:
+    p["text"] = _strip_media_only(str(p.get("text", "")))
+  posts = [p for p in posts if str(p.get("text", "")).strip()]
 
   if topic_name:
     topic = db.get_topic_profile(user_id, topic_name)
@@ -253,17 +262,11 @@ async def send_digest(
   except Exception:
     end_local = end.astimezone()
   title = f"{title_prefix} ({scope_title}) • {t(lang, 'for_hours').format(hours=hours)} • {end_local.strftime('%d.%m.%Y %H:%M')}"
-  text = format_digest(title, clusters, top_k=top_k, lang=lang)
+  text = format_digest(title, clusters, top_k=top_k, lang=lang, tzname=tzname)
   db.incr_metric("digests_generated", 1)
-  inline_preview = bool(DIGEST_INLINE_PREVIEW)
-  media_links = _media_preview_links(clusters, max_links=max(0, int(DIGEST_MEDIA_PREVIEW_MAX)))
-  inline_preview_active = inline_preview and bool(media_links)
-  if inline_preview_active:
-    # Telegram shows preview from one link in a text message; put media link first.
-    text = f"{media_links[0]}\n\n{text}"
 
   if len(text) <= 3800:
-    await bot.send_message(user_id, text, disable_web_page_preview=not inline_preview_active)
+    await bot.send_message(user_id, text, disable_web_page_preview=True)
     return
 
   chunks, cur = [], ""
@@ -277,9 +280,8 @@ async def send_digest(
   if cur.strip():
     chunks.append(cur.strip())
 
-  for i, chunk in enumerate(chunks):
-    preview_for_chunk = inline_preview_active and i == 0
-    await bot.send_message(user_id, chunk, disable_web_page_preview=not preview_for_chunk)
+  for chunk in chunks:
+    await bot.send_message(user_id, chunk, disable_web_page_preview=True)
 
 
 def menu_kb(hourly_on: bool, daily_on: bool, lang: str = "en", view: str = "main"):
@@ -434,10 +436,12 @@ def _status_text(user_id: int, lang: str, hourly_on: bool, daily_on: bool) -> st
   st = db.status_summary(user_id)
   sch = db.get_schedule(user_id)
   s = db.get_user_settings(user_id)
+  tzname = str(sch.get("timezone", "UTC"))
   last = st.get("last_channel")
   last_line = "—"
   if last:
-    last_line = f"@{last['username']} (last_msg_id={last['last_msg_id']}, updated_at={last['updated_at']})"
+    updated = _fmt_utc_human(last.get("updated_at"), tzname)
+    last_line = f"@{last['username']} (last_msg_id={last['last_msg_id']}, {updated})"
 
   txt = (
     f"{t(lang, 'status_title')}\n"

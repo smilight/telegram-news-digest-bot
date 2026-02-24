@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import datetime as dt
 from dataclasses import dataclass
+from zoneinfo import ZoneInfo
 from .semantic import embed_texts, match_clusters, DEDUP_MODE
 from .i18n import t
 
@@ -31,12 +32,35 @@ def _pretty_media_tags(text: str) -> str:
   return out
 
 
-def _is_media_only_text(text: str) -> bool:
-  t = (text or "").strip().lower()
-  if not t:
-    return False
+def _strip_media_lines(text: str) -> str:
+  if not text:
+    return ""
   tags = {k.lower() for k in MEDIA_TAGS.keys()} | {v.lower() for v in MEDIA_TAGS.values()}
-  return t in tags
+  lines = []
+  for ln in str(text).splitlines():
+    s = ln.strip()
+    if not s:
+      continue
+    if s.lower() in tags:
+      continue
+    lines.append(s)
+  return "\n".join(lines)
+
+
+def _is_media_only_text(text: str) -> bool:
+  return _strip_media_lines(text) == ""
+
+
+def _fmt_local(iso_utc: str, tzname: str) -> str:
+  s = str(iso_utc or "").strip()
+  if not s:
+    return ""
+  try:
+    d = dt.datetime.fromisoformat(s.replace("Z", "+00:00"))
+    z = ZoneInfo(tzname)
+    return d.astimezone(z).strftime("%d.%m %H:%M")
+  except Exception:
+    return s
 
 def first_sentence(text: str, limit: int = 220) -> str:
   t = text.strip().replace("\n", " ")
@@ -135,11 +159,11 @@ def rank_clusters(clusters: List[Cluster]) -> List[Cluster]:
 
 def _cluster_summary(c: Cluster, lang: str) -> str:
   texts = []
-  rep = _pretty_media_tags(normalize_text(c.rep.get("text", "")))
+  rep = _pretty_media_tags(normalize_text(_strip_media_lines(c.rep.get("text", ""))))
   if rep:
     texts.append(first_sentence(rep, limit=180))
   for it in c.items[:4]:
-    txt = _pretty_media_tags(normalize_text(it.get("text", "")))
+    txt = _pretty_media_tags(normalize_text(_strip_media_lines(it.get("text", ""))))
     if not txt:
       continue
     sent = first_sentence(txt, limit=120)
@@ -153,7 +177,7 @@ def _cluster_summary(c: Cluster, lang: str) -> str:
     return texts[0]
   return f"{texts[0]} {t(lang, 'digest_then')} {texts[1]}"
 
-def format_digest(title: str, clusters: List[Cluster], top_k: int = 12, lang: str = "en") -> str:
+def format_digest(title: str, clusters: List[Cluster], top_k: int = 12, lang: str = "en", tzname: str = "UTC") -> str:
   clusters = rank_clusters(clusters)[:top_k]
   lines = [f"🗞️ {title}", ""]
   if not clusters:
@@ -176,16 +200,13 @@ def format_digest(title: str, clusters: List[Cluster], top_k: int = 12, lang: st
     lines.append(f"{idx}) {summary}")
     rep_time = str(c.rep.get("date_utc", ""))
     if rep_time:
-      lines.append(f"🕒 {rep_time}")
+      lines.append(f"🕒 {_fmt_local(rep_time, tzname)}")
     importance = float(c.rep.get("_importance", 0.0))
     lines.append(
       f"{t(lang,'cluster_sources')}: {sources_cnt} • "
       f"{t(lang,'cluster_posts')}: {len(c.items)} • "
       f"{t(lang,'cluster_importance')}: {importance:.1f}"
     )
-    first_ch, first_dt, first_link = cluster_first_source(c)
-    if first_ch and first_dt:
-      lines.append(f"{t(lang,'cluster_first')}: @{first_ch} • {first_dt}")
     spread = cluster_spread(c, limit=6)
     if len(spread) > 1:
       lines.append(t(lang,'cluster_spread') + ": " + ", ".join(["@"+x for x in spread]))

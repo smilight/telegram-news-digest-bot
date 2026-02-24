@@ -5,6 +5,7 @@ import hashlib
 import re
 from collections import defaultdict
 from typing import Dict, List
+from zoneinfo import ZoneInfo
 
 from aiogram import Bot
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
@@ -198,12 +199,12 @@ def _link_or_empty(link: str) -> str:
   return str(link).strip() if link else ""
 
 
-def _short_time(iso_utc: str | None) -> str:
+def _short_time(iso_utc: str | None, timezone_name: str = "UTC") -> str:
   if not iso_utc:
     return "--:--"
   try:
     d = dt.datetime.fromisoformat(str(iso_utc).replace("Z", "+00:00"))
-    return d.strftime("%H:%M")
+    return d.astimezone(ZoneInfo(timezone_name)).strftime("%d.%m %H:%M")
   except Exception:
     return "--:--"
 
@@ -228,7 +229,13 @@ def _parse_period_min(raw: str | None) -> int | None:
   return n * 1440
 
 
-def build_monitor_text(lang: str, events: List[Dict[str, object]], period_min: int, compact: bool = True) -> str:
+def build_monitor_text(
+  lang: str,
+  events: List[Dict[str, object]],
+  period_min: int,
+  compact: bool = True,
+  timezone_name: str = "UTC",
+) -> str:
   header = f"{t(lang, 'monitor_title')} ({_format_period(period_min)})"
   if not events:
     return f"{header}\n\n{t(lang, 'monitor_empty')}"
@@ -238,7 +245,7 @@ def build_monitor_text(lang: str, events: List[Dict[str, object]], period_min: i
     for e in events[:8]:
       pr = _prio_title(lang, str(e["priority"]))
       cfm = f" {t(lang, 'monitor_confirmed')}" if bool(e.get("confirmed")) else ""
-      tm = _short_time(str(e.get("date_utc") or ""))
+      tm = _short_time(str(e.get("date_utc") or ""), timezone_name=timezone_name)
       lines.append(f"• {tm} [{pr}] {_cat_title(lang, str(e['category']))} • {e['where']} • src:{e['sources_count']}{cfm}")
       link = _link_or_empty(str(e.get("link") or ""))
       if link:
@@ -262,7 +269,7 @@ def build_monitor_text(lang: str, events: List[Dict[str, object]], period_min: i
       total += 1
       pr = _prio_title(lang, str(e["priority"]))
       cfm = f" {t(lang, 'monitor_confirmed')}" if bool(e.get("confirmed")) else ""
-      tm = _short_time(str(e.get("date_utc") or ""))
+      tm = _short_time(str(e.get("date_utc") or ""), timezone_name=timezone_name)
       lines.append(f"• {tm} [{pr}] {e['where']}: {e['what']} (src:{e['sources_count']}, @{e['source']}){cfm}")
       link = _link_or_empty(str(e.get("link") or ""))
       if link:
@@ -344,7 +351,8 @@ async def send_monitoring_summary(bot: Bot, user_id: int, period_min: int = 2, f
   if not force and not send_events:
     return False
 
-  text = build_monitor_text(lang, send_events, period_min=period_min, compact=True)
+  tzname = str(settings.get("timezone", "UTC"))
+  text = build_monitor_text(lang, send_events, period_min=period_min, compact=True, timezone_name=tzname)
   await bot.send_message(user_id, text, disable_web_page_preview=True, reply_markup=monitor_keyboard(lang, period_min=period_min))
 
   if not force:
@@ -364,7 +372,8 @@ async def send_monitoring_report(bot: Bot, user_id: int, period_min: int) -> boo
     end.strftime("%Y-%m-%dT%H:%M:%SZ"),
   )
   events = analyze_events(posts, settings)
-  text = build_monitor_text(lang, events, period_min=period_min, compact=False)
+  tzname = str(settings.get("timezone", "UTC"))
+  text = build_monitor_text(lang, events, period_min=period_min, compact=False, timezone_name=tzname)
   await bot.send_message(user_id, text, disable_web_page_preview=True, reply_markup=monitor_keyboard(lang, period_min=period_min))
   db.incr_metric("monitor_report_sent", 1)
   return True
