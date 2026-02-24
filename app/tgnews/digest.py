@@ -144,6 +144,9 @@ def format_digest(title: str, clusters: List[Cluster], top_k: int = 12, lang: st
     extra = f" (+{len(c.items)-len(links)} {t(lang, 'digest_more')})" if len(c.items) > len(links) else ""
     sources_cnt = len({it['channel_username'] for it in c.items})
     lines.append(f"{idx}) {summary}")
+    rep_time = str(c.rep.get("date_utc", ""))
+    if rep_time:
+      lines.append(f"🕒 {rep_time}")
     importance = float(c.rep.get("_importance", 0.0))
     lines.append(
       f"{t(lang,'cluster_sources')}: {sources_cnt} • "

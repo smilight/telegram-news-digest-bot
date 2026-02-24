@@ -183,6 +183,16 @@ def _format_period(period_min: int) -> str:
   return f"{period_min}m"
 
 
+def _short_time(iso_utc: str | None) -> str:
+  if not iso_utc:
+    return "--:--"
+  try:
+    d = dt.datetime.fromisoformat(str(iso_utc).replace("Z", "+00:00"))
+    return d.strftime("%H:%M")
+  except Exception:
+    return "--:--"
+
+
 def _parse_period_min(raw: str | None) -> int | None:
   if raw is None:
     return None
@@ -213,7 +223,8 @@ def build_monitor_text(lang: str, events: List[Dict[str, object]], period_min: i
     for e in events[:8]:
       pr = _prio_title(lang, str(e["priority"]))
       cfm = f" {t(lang, 'monitor_confirmed')}" if bool(e.get("confirmed")) else ""
-      lines.append(f"• [{pr}] {_cat_title(lang, str(e['category']))} • {e['where']} • src:{e['sources_count']}{cfm}")
+      tm = _short_time(str(e.get("date_utc") or ""))
+      lines.append(f"• {tm} [{pr}] {_cat_title(lang, str(e['category']))} • {e['where']} • src:{e['sources_count']}{cfm}")
     if len(events) > 8:
       lines.append(f"... +{len(events)-8}")
     return "\n".join(lines).strip()
@@ -233,7 +244,8 @@ def build_monitor_text(lang: str, events: List[Dict[str, object]], period_min: i
       total += 1
       pr = _prio_title(lang, str(e["priority"]))
       cfm = f" {t(lang, 'monitor_confirmed')}" if bool(e.get("confirmed")) else ""
-      lines.append(f"• [{pr}] {e['where']}: {e['what']} (src:{e['sources_count']}, @{e['source']}){cfm}")
+      tm = _short_time(str(e.get("date_utc") or ""))
+      lines.append(f"• {tm} [{pr}] {e['where']}: {e['what']} (src:{e['sources_count']}, @{e['source']}){cfm}")
     lines.append("")
 
   if total == 0:

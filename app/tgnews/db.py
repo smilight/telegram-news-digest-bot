@@ -716,6 +716,29 @@ def get_metrics() -> Dict[str, int]:
     return {str(r["key"]): int(r["value"]) for r in rows}
 
 
+def cleanup_old_data(retention_days: int) -> Dict[str, int]:
+  days = max(1, int(retention_days))
+  with connect() as conn:
+    posts = conn.execute(
+      "DELETE FROM posts WHERE date_utc < strftime('%Y-%m-%dT%H:%M:%SZ', datetime('now', ?))",
+      (f"-{days} days",),
+    ).rowcount
+    alerts = conn.execute(
+      "DELETE FROM alerts WHERE sent_at < datetime('now', ?)",
+      (f"-{days} days",),
+    ).rowcount
+    muted = conn.execute(
+      "DELETE FROM muted_alerts WHERE muted_at < datetime('now', ?)",
+      (f"-{days} days",),
+    ).rowcount
+    conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    return {
+      "posts_deleted": int(posts or 0),
+      "alerts_deleted": int(alerts or 0),
+      "muted_deleted": int(muted or 0),
+    }
+
+
 def set_monitoring_enabled(user_id: int, enabled: bool):
   with connect() as conn:
     conn.execute("UPDATE users SET monitor_enabled=? WHERE user_id=?", (1 if enabled else 0, int(user_id)))

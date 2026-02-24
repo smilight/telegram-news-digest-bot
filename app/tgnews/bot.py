@@ -460,11 +460,34 @@ def _dev_status_text(user_id: int, lang: str) -> str:
   sch = db.get_schedule(user_id)
   s = db.get_user_settings(user_id)
   tz = str(sch.get("timezone", "UTC"))
+  try:
+    local_now = dt.datetime.now(dt.timezone.utc).astimezone(ZoneInfo(tz))
+  except Exception:
+    local_now = dt.datetime.now(dt.timezone.utc)
+
+  hour_key = local_now.strftime("%Y-%m-%dT%H")
+  target_min = max(0, min(59, int(sch.get("hourly_minute", 2))))
+  next_hourly = local_now.replace(second=0, microsecond=0, minute=target_min)
+  if sch.get("last_hourly_sent_hour") == hour_key or local_now.minute >= target_min:
+    next_hourly = next_hourly + dt.timedelta(hours=1)
+
+  today_key = local_now.strftime("%Y-%m-%d")
+  daily_raw = str(sch.get("daily_time", "09:00"))
+  try:
+    dh, dm = [int(x) for x in daily_raw.split(":", 1)]
+    next_daily = local_now.replace(hour=dh, minute=dm, second=0, microsecond=0)
+  except Exception:
+    next_daily = local_now.replace(hour=9, minute=0, second=0, microsecond=0)
+  if sch.get("last_daily_sent_date") == today_key or local_now >= next_daily:
+    next_daily = next_daily + dt.timedelta(days=1)
+
   now = now_utc().strftime("%Y-%m-%d %H:%M:%SZ")
   return (
     f"{t(lang, 'dev_status_title')}\n"
     f"• now_utc={now}\n"
     f"• tz={tz}\n"
+    f"• {t(lang, 'dev_next_hourly_due')}={next_hourly.strftime('%Y-%m-%d %H:%M')}\n"
+    f"• {t(lang, 'dev_next_daily_due')}={next_daily.strftime('%Y-%m-%d %H:%M')}\n"
     f"• monitor_enabled={bool(s.get('monitor_enabled', 0))}\n"
     f"• monitor_interval_min={int(s.get('monitor_interval_min', 2))}\n"
     f"• monitor_antiflood_min={int(s.get('monitor_antiflood_min', 7))}\n"

@@ -15,6 +15,8 @@ from . import monitoring
 from .semantic import DEDUP_MODE, embed_texts, similarity
 
 TZ = os.getenv("TZ", "UTC")
+DB_RETENTION_DAYS = int(os.getenv("DB_RETENTION_DAYS", "60"))
+DB_CLEANUP_EVERY_MIN = int(os.getenv("DB_CLEANUP_EVERY_MIN", "60"))
 
 
 def _now_local() -> dt.datetime:
@@ -51,6 +53,28 @@ def _in_quiet_hours(s: dict, local_now: dt.datetime) -> bool:
 def _alert_key(rep: dict) -> str:
   base = rep.get("norm_hash") or rep.get("link") or (rep.get("text", "")[:120])
   return hashlib.sha1(str(base).encode("utf-8", errors="ignore")).hexdigest()[:40]
+
+
+def _daily_time_reached(local_now: dt.datetime, hhmm: str) -> bool:
+  try:
+    h, m = [int(x) for x in str(hhmm).split(":", 1)]
+    target = h * 60 + m
+    cur = local_now.hour * 60 + local_now.minute
+    return cur >= target
+  except Exception:
+    return local_now.hour >= 9
+
+
+def _parse_slot_utc(slot: str | None) -> dt.datetime | None:
+  if not slot:
+    return None
+  try:
+    s = str(slot)
+    if len(s) == 16:
+      return dt.datetime.fromisoformat(s).replace(tzinfo=dt.timezone.utc)
+    return dt.datetime.fromisoformat(s.replace("Z", "+00:00")).astimezone(dt.timezone.utc)
+  except Exception:
+    return None
 
 
 async def _run_breaking(bot):
@@ -167,8 +191,10 @@ async def _run_breaking(bot):
 
 def setup_scheduler(bot):
   sched = AsyncIOScheduler(timezone=TZ)
+  last_cleanup_at: dt.datetime | None = None
 
   async def tick():
+    nonlocal last_cleanup_at
     now = _now_local()
 
     for uid in db.list_users_with_flag("hourly_enabled"):
@@ -177,10 +203,12 @@ def setup_scheduler(bot):
         local_now = _user_local_now(str(sch.get("timezone", "UTC")))
         if _in_quiet_hours(sch, local_now):
           continue
-        if int(sch.get("hourly_minute", 2)) != local_now.minute:
-          continue
         hour_key = local_now.strftime("%Y-%m-%dT%H")
         if sch.get("last_hourly_sent_hour") == hour_key:
+          continue
+        target_min = max(0, min(59, int(sch.get("hourly_minute", 2))))
+        # Send once in this hour when configured minute is reached (robust to restarts/lag).
+        if local_now.minute < target_min:
           continue
         lang = db.get_lang(uid)
         await send_digest(bot, uid, dt.timedelta(hours=1), top_k=8, title_prefix=t(lang, "hourly_digest"), scope="hourly")
@@ -195,11 +223,10 @@ def setup_scheduler(bot):
         local_now = _user_local_now(str(sch.get("timezone", "UTC")))
         if _in_quiet_hours(sch, local_now):
           continue
-        hhmm = local_now.strftime("%H:%M")
         today_key = local_now.strftime("%Y-%m-%d")
-        if sch.get("daily_time", "09:00") != hhmm:
-          continue
         if sch.get("last_daily_sent_date") == today_key:
+          continue
+        if not _daily_time_reached(local_now, str(sch.get("daily_time", "09:00"))):
           continue
         lang = db.get_lang(uid)
         await send_digest(bot, uid, dt.timedelta(hours=24), top_k=15, title_prefix=t(lang, "daily_digest"), scope="daily")
@@ -223,15 +250,23 @@ def setup_scheduler(bot):
           except Exception:
             pass
         interval = max(1, min(30, int(s.get("monitor_interval_min", 2))))
-        if local_now.minute % interval != 0:
-          continue
-        slot_key = local_now.strftime("%Y-%m-%dT%H:%M")
-        if s.get("monitor_last_slot") == slot_key:
+        now_utc_min = dt.datetime.now(dt.timezone.utc).replace(second=0, microsecond=0)
+        last_slot = _parse_slot_utc(s.get("monitor_last_slot"))
+        if last_slot and (now_utc_min - last_slot).total_seconds() < interval * 60:
           continue
         await monitoring.send_monitoring_summary(bot, uid, period_min=interval, force=False)
-        db.mark_monitor_slot(uid, slot_key)
+        db.mark_monitor_slot(uid, now_utc_min.strftime("%Y-%m-%dT%H:%M:%SZ"))
       except Exception:
         continue
+
+    try:
+      cleanup_every = max(5, int(DB_CLEANUP_EVERY_MIN))
+      now_utc = dt.datetime.now(dt.timezone.utc)
+      if last_cleanup_at is None or (now_utc - last_cleanup_at).total_seconds() >= cleanup_every * 60:
+        db.cleanup_old_data(max(1, int(DB_RETENTION_DAYS)))
+        last_cleanup_at = now_utc
+    except Exception:
+      pass
 
     try:
       await _run_breaking(bot)
