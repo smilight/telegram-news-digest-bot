@@ -1,0 +1,5 @@
+# Optional: better near-duplicate clustering.
+# This will increase image size and download a model at runtime.
+sentence-transformers==2.7.0
+torch>=2.2.0
+numpy>=1.26.0

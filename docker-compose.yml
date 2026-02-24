@@ -1,0 +1,19 @@
+services:
+  tgnews:
+    build: .
+    container_name: tgnews
+    restart: unless-stopped
+    environment:
+      - TG_API_ID=${TG_API_ID}
+      - TG_API_HASH=${TG_API_HASH}
+      - BOT_TOKEN=${BOT_TOKEN}
+      - TZ=Europe/Kiev
+      - DB_PATH=/data/app.db
+      - TELETHON_SESSION=/data/telethon.session
+      - COLLECTOR_POLL_SECONDS=120
+      - DIGEST_TOPK_HOURLY=8
+      - DIGEST_TOPK_DAILY=15
+      - DEDUP_MODE=simhash  # simhash | embeddings (optional, see README)
+      - EMBEDDING_MODEL=sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+    volumes:
+      - ./data:/data

@@ -1,0 +1,8 @@
+/.env
+*.env
+/tg.txt
+/data
+/.idea/
+.DS_Store
+__pycache__/
+*.pyc
