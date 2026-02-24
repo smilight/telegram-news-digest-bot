@@ -291,6 +291,17 @@ def init_db():
     _ensure_stats_table(conn)
     _ensure_extra_tables(conn)
 
+
+def backfill_user_timezone(default_tz: str):
+  tz = str(default_tz or "").strip()
+  if not tz or tz == "UTC":
+    return
+  with connect() as conn:
+    conn.execute(
+      "UPDATE users SET timezone=? WHERE timezone IS NULL OR TRIM(timezone)='' OR timezone='UTC'",
+      (tz,),
+    )
+
 def ensure_user(user_id: int) -> bool:
   with connect() as conn:
     cur = conn.execute("INSERT OR IGNORE INTO users(user_id) VALUES (?)", (user_id,))
