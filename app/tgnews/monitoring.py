@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 import hashlib
+import os
 import re
 from collections import defaultdict
 from typing import Dict, List
@@ -23,6 +24,11 @@ CATEGORY_KEYWORDS = {
 }
 
 CATEGORY_ORDER = ["launches", "drones", "missiles", "aviation", "naval"]
+MONTH_ABBR = {
+  "en": ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"],
+  "uk": ["січ", "лют", "бер", "кві", "тра", "чер", "лип", "сер", "вер", "жов", "лис", "гру"],
+  "ru": ["янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"],
+}
 MEDIA_TAGS = {
   "[photo]": "📷 photo",
   "[video]": "🎬 video",
@@ -199,14 +205,28 @@ def _link_or_empty(link: str) -> str:
   return str(link).strip() if link else ""
 
 
-def _short_time(iso_utc: str | None, timezone_name: str = "UTC") -> str:
+def _short_time(iso_utc: str | None, timezone_name: str = "UTC", lang: str = "en") -> str:
   if not iso_utc:
     return "--:--"
   try:
     d = dt.datetime.fromisoformat(str(iso_utc).replace("Z", "+00:00"))
-    return d.astimezone(ZoneInfo(timezone_name)).strftime("%d.%m %H:%M")
+    dl = d.astimezone(ZoneInfo(timezone_name))
+    lm = "uk" if str(lang).startswith("uk") else ("ru" if str(lang).startswith("ru") else "en")
+    mon = MONTH_ABBR[lm][dl.month - 1]
+    return f"{dl.day:02d} {mon} {dl:%H:%M}"
   except Exception:
     return "--:--"
+
+
+def _effective_tz_name(raw: str | None) -> str:
+  tz = str(raw or "").strip() or "UTC"
+  if tz == "UTC":
+    tz = str(os.getenv("TZ", "UTC")).strip() or "UTC"
+  try:
+    ZoneInfo(tz)
+    return tz
+  except Exception:
+    return "UTC"
 
 
 def _parse_period_min(raw: str | None) -> int | None:
@@ -245,7 +265,7 @@ def build_monitor_text(
     for e in events[:8]:
       pr = _prio_title(lang, str(e["priority"]))
       cfm = f" {t(lang, 'monitor_confirmed')}" if bool(e.get("confirmed")) else ""
-      tm = _short_time(str(e.get("date_utc") or ""), timezone_name=timezone_name)
+      tm = _short_time(str(e.get("date_utc") or ""), timezone_name=timezone_name, lang=lang)
       lines.append(f"• {tm} [{pr}] {_cat_title(lang, str(e['category']))} • {e['where']} • src:{e['sources_count']}{cfm}")
       link = _link_or_empty(str(e.get("link") or ""))
       if link:
@@ -269,7 +289,7 @@ def build_monitor_text(
       total += 1
       pr = _prio_title(lang, str(e["priority"]))
       cfm = f" {t(lang, 'monitor_confirmed')}" if bool(e.get("confirmed")) else ""
-      tm = _short_time(str(e.get("date_utc") or ""), timezone_name=timezone_name)
+      tm = _short_time(str(e.get("date_utc") or ""), timezone_name=timezone_name, lang=lang)
       lines.append(f"• {tm} [{pr}] {e['where']}: {e['what']} (src:{e['sources_count']}, @{e['source']}){cfm}")
       link = _link_or_empty(str(e.get("link") or ""))
       if link:
@@ -351,7 +371,7 @@ async def send_monitoring_summary(bot: Bot, user_id: int, period_min: int = 2, f
   if not force and not send_events:
     return False
 
-  tzname = str(settings.get("timezone", "UTC"))
+  tzname = _effective_tz_name(str(settings.get("timezone", "UTC")))
   text = build_monitor_text(lang, send_events, period_min=period_min, compact=True, timezone_name=tzname)
   await bot.send_message(user_id, text, disable_web_page_preview=True, reply_markup=monitor_keyboard(lang, period_min=period_min))
 
@@ -372,7 +392,7 @@ async def send_monitoring_report(bot: Bot, user_id: int, period_min: int) -> boo
     end.strftime("%Y-%m-%dT%H:%M:%SZ"),
   )
   events = analyze_events(posts, settings)
-  tzname = str(settings.get("timezone", "UTC"))
+  tzname = _effective_tz_name(str(settings.get("timezone", "UTC")))
   text = build_monitor_text(lang, events, period_min=period_min, compact=False, timezone_name=tzname)
   await bot.send_message(user_id, text, disable_web_page_preview=True, reply_markup=monitor_keyboard(lang, period_min=period_min))
   db.incr_metric("monitor_report_sent", 1)

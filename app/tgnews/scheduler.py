@@ -32,6 +32,17 @@ def _user_local_now(timezone_name: str) -> dt.datetime:
     return dt.datetime.now(dt.timezone.utc)
 
 
+def _effective_tz_name(raw: str | None) -> str:
+  tz = str(raw or "").strip() or "UTC"
+  if tz == "UTC":
+    tz = TZ
+  try:
+    ZoneInfo(tz)
+    return tz
+  except Exception:
+    return "UTC"
+
+
 def _in_quiet_hours(s: dict, local_now: dt.datetime) -> bool:
   if not bool(s.get("quiet_hours_enabled", 0)):
     return False
@@ -208,7 +219,7 @@ def setup_scheduler(bot):
     for uid in db.list_users_with_flag("hourly_enabled"):
       try:
         sch = db.get_schedule(uid)
-        local_now = _user_local_now(str(sch.get("timezone", "UTC")))
+        local_now = _user_local_now(_effective_tz_name(str(sch.get("timezone", "UTC"))))
         if _in_quiet_hours(sch, local_now):
           continue
         hour_key = local_now.strftime("%Y-%m-%dT%H")
@@ -229,7 +240,7 @@ def setup_scheduler(bot):
     for uid in db.list_users_with_flag("daily_enabled"):
       try:
         sch = db.get_schedule(uid)
-        local_now = _user_local_now(str(sch.get("timezone", "UTC")))
+        local_now = _user_local_now(_effective_tz_name(str(sch.get("timezone", "UTC"))))
         if _in_quiet_hours(sch, local_now):
           continue
         today_key = local_now.strftime("%Y-%m-%d")
@@ -248,7 +259,8 @@ def setup_scheduler(bot):
     for uid in db.list_users_monitoring_enabled():
       try:
         s = db.get_user_settings(uid)
-        local_now = _user_local_now(str(s.get("timezone", "UTC")))
+        tzname = _effective_tz_name(str(s.get("timezone", "UTC")))
+        local_now = _user_local_now(tzname)
         if _in_quiet_hours(s, local_now):
           continue
         pause_until = s.get("monitor_pause_until_utc")
@@ -261,7 +273,7 @@ def setup_scheduler(bot):
             pass
         interval = max(1, min(30, int(s.get("monitor_interval_min", 2))))
         now_utc_min = dt.datetime.now(dt.timezone.utc).replace(second=0, microsecond=0)
-        last_slot = _parse_slot_utc(s.get("monitor_last_slot"), timezone_name=str(s.get("timezone", "UTC")))
+        last_slot = _parse_slot_utc(s.get("monitor_last_slot"), timezone_name=tzname)
         if last_slot and (now_utc_min - last_slot).total_seconds() < interval * 60:
           continue
         await monitoring.send_monitoring_summary(bot, uid, period_min=interval, force=False)

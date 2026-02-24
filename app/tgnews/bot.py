@@ -31,6 +31,12 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 DIGEST_TOPK_HOURLY = int(os.getenv("DIGEST_TOPK_HOURLY", "8"))
 DIGEST_TOPK_DAILY = int(os.getenv("DIGEST_TOPK_DAILY", "15"))
 
+MONTH_ABBR = {
+  "en": ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"],
+  "uk": ["січ", "лют", "бер", "кві", "тра", "чер", "лип", "сер", "вер", "жов", "лис", "гру"],
+  "ru": ["янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"],
+}
+
 RE_CH = re.compile(r"@?([A-Za-z0-9_]{4,32})")
 RE_CH_FULL = re.compile(r"^@?([A-Za-z0-9_]{4,32})$")
 RE_TME = re.compile(r"^(?:https?://)?(?:t\.me|telegram\.me)/(?:(?:s|c)/)?([A-Za-z0-9_]{4,32})(?:[/?#].*)?$", re.IGNORECASE)
@@ -125,10 +131,13 @@ def parse_channel_ref(raw: str | None) -> str | None:
 def _ensure_user_and_lang(user_id: int, tg_lang: str | None = None) -> str:
   created = db.ensure_user(user_id)
   default_tz = os.getenv("TZ", "UTC")
-  if created and default_tz and default_tz != "UTC":
+  if default_tz and default_tz != "UTC":
     try:
       ZoneInfo(default_tz)
-      db.set_timezone(user_id, default_tz)
+      sch = db.get_schedule(user_id)
+      cur_tz = str(sch.get("timezone", "UTC"))
+      if created or cur_tz == "UTC":
+        db.set_timezone(user_id, default_tz)
     except Exception:
       pass
   if created and tg_lang:
@@ -164,7 +173,24 @@ def _scope_title(lang: str, scope: str) -> str:
   return t(lang, "scope_all")
 
 
-def _fmt_utc_human(raw: str | None, tzname: str) -> str:
+def _effective_tz_name(raw: str | None) -> str:
+  tz = str(raw or "").strip() or "UTC"
+  if tz == "UTC":
+    tz = str(os.getenv("TZ", "UTC")).strip() or "UTC"
+  try:
+    ZoneInfo(tz)
+    return tz
+  except Exception:
+    return "UTC"
+
+
+def _fmt_dt_human(d: dt.datetime, lang: str) -> str:
+  lm = "uk" if str(lang).startswith("uk") else ("ru" if str(lang).startswith("ru") else "en")
+  mon = MONTH_ABBR[lm][d.month - 1]
+  return f"{d.day:02d} {mon} {d:%H:%M}"
+
+
+def _fmt_utc_human(raw: str | None, tzname: str, lang: str) -> str:
   s = str(raw or "").strip()
   if not s:
     return "—"
@@ -174,7 +200,7 @@ def _fmt_utc_human(raw: str | None, tzname: str) -> str:
     else:
       # SQLite datetime('now') format
       d = dt.datetime.fromisoformat(s.replace(" ", "T") + "+00:00")
-    return d.astimezone(ZoneInfo(tzname)).strftime("%d.%m %H:%M")
+    return _fmt_dt_human(d.astimezone(ZoneInfo(tzname)), lang)
   except Exception:
     return s
 
@@ -256,12 +282,13 @@ async def send_digest(
   clusters = cluster_posts(posts)
   hours = max(1, int(period.total_seconds() // 3600))
   scope_title = _scope_title(lang, scope)
+  tzname = _effective_tz_name(str(settings.get("timezone", "UTC")))
   try:
-    tzname = str(settings.get("timezone", "UTC"))
     end_local = end.astimezone(ZoneInfo(tzname))
   except Exception:
+    tzname = "UTC"
     end_local = end.astimezone()
-  title = f"{title_prefix} ({scope_title}) • {t(lang, 'for_hours').format(hours=hours)} • {end_local.strftime('%d.%m.%Y %H:%M')}"
+  title = f"{title_prefix} ({scope_title}) • {t(lang, 'for_hours').format(hours=hours)} • {_fmt_dt_human(end_local, lang)}"
   text = format_digest(title, clusters, top_k=top_k, lang=lang, tzname=tzname)
   db.incr_metric("digests_generated", 1)
 
@@ -436,11 +463,11 @@ def _status_text(user_id: int, lang: str, hourly_on: bool, daily_on: bool) -> st
   st = db.status_summary(user_id)
   sch = db.get_schedule(user_id)
   s = db.get_user_settings(user_id)
-  tzname = str(sch.get("timezone", "UTC"))
+  tzname = _effective_tz_name(str(sch.get("timezone", "UTC")))
   last = st.get("last_channel")
   last_line = "—"
   if last:
-    updated = _fmt_utc_human(last.get("updated_at"), tzname)
+    updated = _fmt_utc_human(last.get("updated_at"), tzname, lang)
     last_line = f"@{last['username']} (last_msg_id={last['last_msg_id']}, {updated})"
 
   txt = (
@@ -449,7 +476,7 @@ def _status_text(user_id: int, lang: str, hourly_on: bool, daily_on: bool) -> st
     f"{t(lang, 'status_daily')}: {daily_on}\n"
     f"{t(lang, 'status_hourly_min')}: {int(sch.get('hourly_minute', 2)):02d}\n"
     f"{t(lang, 'status_daily_time')}: {sch.get('daily_time', '09:00')}\n"
-    f"{t(lang, 'status_timezone')}: {sch.get('timezone', 'UTC')}\n"
+    f"{t(lang, 'status_timezone')}: {tzname}\n"
     f"{t(lang, 'status_quiet')}: {bool(sch.get('quiet_hours_enabled', 0))} "
     f"({sch.get('quiet_start', '23:00')}–{sch.get('quiet_end', '07:00')})\n"
     f"{t(lang, 'status_dedup')}: {os.getenv('DEDUP_MODE', 'simhash')}\n"
@@ -525,13 +552,13 @@ def _dev_status_text(user_id: int, lang: str) -> str:
   if sch.get("last_daily_sent_date") == today_key or local_now >= next_daily:
     next_daily = next_daily + dt.timedelta(days=1)
 
-  now = now_utc().strftime("%Y-%m-%d %H:%M:%SZ")
+  now = _fmt_dt_human(now_utc(), "en") + " UTC"
   return (
     f"{t(lang, 'dev_status_title')}\n"
     f"• now_utc={now}\n"
     f"• tz={tz}\n"
-    f"• {t(lang, 'dev_next_hourly_due')}={next_hourly.strftime('%Y-%m-%d %H:%M')}\n"
-    f"• {t(lang, 'dev_next_daily_due')}={next_daily.strftime('%Y-%m-%d %H:%M')}\n"
+    f"• {t(lang, 'dev_next_hourly_due')}={_fmt_dt_human(next_hourly, lang)}\n"
+    f"• {t(lang, 'dev_next_daily_due')}={_fmt_dt_human(next_daily, lang)}\n"
     f"• monitor_enabled={bool(s.get('monitor_enabled', 0))}\n"
     f"• monitor_interval_min={int(s.get('monitor_interval_min', 2))}\n"
     f"• monitor_antiflood_min={int(s.get('monitor_antiflood_min', 7))}\n"

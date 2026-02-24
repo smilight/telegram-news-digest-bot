@@ -24,6 +24,12 @@ MEDIA_TAGS = {
   "[media]": "📎 media",
 }
 
+MONTH_ABBR = {
+  "en": ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"],
+  "uk": ["січ", "лют", "бер", "кві", "тра", "чер", "лип", "сер", "вер", "жов", "лис", "гру"],
+  "ru": ["янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"],
+}
+
 
 def _pretty_media_tags(text: str) -> str:
   out = text or ""
@@ -51,14 +57,17 @@ def _is_media_only_text(text: str) -> bool:
   return _strip_media_lines(text) == ""
 
 
-def _fmt_local(iso_utc: str, tzname: str) -> str:
+def _fmt_local(iso_utc: str, tzname: str, lang: str) -> str:
   s = str(iso_utc or "").strip()
   if not s:
     return ""
   try:
     d = dt.datetime.fromisoformat(s.replace("Z", "+00:00"))
     z = ZoneInfo(tzname)
-    return d.astimezone(z).strftime("%d.%m %H:%M")
+    dl = d.astimezone(z)
+    lm = "uk" if lang.startswith("uk") else ("ru" if lang.startswith("ru") else "en")
+    mon = MONTH_ABBR[lm][dl.month - 1]
+    return f"{dl.day:02d} {mon} {dl:%H:%M}"
   except Exception:
     return s
 
@@ -200,13 +209,9 @@ def format_digest(title: str, clusters: List[Cluster], top_k: int = 12, lang: st
     lines.append(f"{idx}) {summary}")
     rep_time = str(c.rep.get("date_utc", ""))
     if rep_time:
-      lines.append(f"🕒 {_fmt_local(rep_time, tzname)}")
+      lines.append(f"🕒 {_fmt_local(rep_time, tzname, lang)}")
     importance = float(c.rep.get("_importance", 0.0))
-    lines.append(
-      f"{t(lang,'cluster_sources')}: {sources_cnt} • "
-      f"{t(lang,'cluster_posts')}: {len(c.items)} • "
-      f"{t(lang,'cluster_importance')}: {importance:.1f}"
-    )
+    lines.append(f"🧩 {sources_cnt}    📰 {len(c.items)}    ⭐ {importance:.1f}")
     spread = cluster_spread(c, limit=6)
     if len(spread) > 1:
       lines.append(t(lang,'cluster_spread') + ": " + ", ".join(["@"+x for x in spread]))
