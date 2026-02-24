@@ -121,7 +121,7 @@ python -m tgnews.main
 | `DB_RETENTION_DAYS` | How many days to keep posts/alerts |
 | `DB_CLEANUP_EVERY_MIN` | Cleanup interval in minutes |
 | `COLLECTOR_POLL_SECONDS` | Collector polling interval |
-| `TZ` | Scheduler timezone (global fallback) |
+| `TZ` | Scheduler timezone (global fallback, example: `Europe/Kyiv`) |
 
 ## Commands
 
@@ -181,6 +181,12 @@ python -m tgnews.main
 - Hourly digest: sends once per hour when configured minute is reached (robust to restarts/lag).
 - Daily digest: sends once per day when configured daily time is reached (robust to restarts/lag).
 - Monitoring: sends periodically by interval elapsed since last slot.
+
+## Timezone troubleshooting
+- Use `TZ=Europe/Kyiv` (not `Europe/Kiev`).
+- If timezone still shows `UTC`, rebuild and restart so updated dependencies are applied:
+  - `docker compose build --no-cache`
+  - `docker compose up -d`
 
 ## Notes on media
 - Digest includes links to source posts.

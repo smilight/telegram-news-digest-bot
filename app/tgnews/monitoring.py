@@ -13,6 +13,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 
 from . import db
 from .i18n import t
+from .tz_utils import canonical_tz_name
 from .text_utils import normalize_text
 
 CATEGORY_KEYWORDS = {
@@ -219,14 +220,7 @@ def _short_time(iso_utc: str | None, timezone_name: str = "UTC", lang: str = "en
 
 
 def _effective_tz_name(raw: str | None) -> str:
-  tz = str(raw or "").strip() or "UTC"
-  if tz == "UTC":
-    tz = str(os.getenv("TZ", "UTC")).strip() or "UTC"
-  try:
-    ZoneInfo(tz)
-    return tz
-  except Exception:
-    return "UTC"
+  return canonical_tz_name(raw, fallback_to_env=True)
 
 
 def _parse_period_min(raw: str | None) -> int | None:

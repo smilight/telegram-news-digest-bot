@@ -14,8 +14,9 @@ from .bot import send_digest
 from .i18n import t
 from . import monitoring
 from .semantic import DEDUP_MODE, embed_texts, similarity
+from .tz_utils import canonical_tz_name
 
-TZ = os.getenv("TZ", "UTC")
+TZ = canonical_tz_name(os.getenv("TZ", "UTC"), fallback_to_env=False)
 DB_RETENTION_DAYS = int(os.getenv("DB_RETENTION_DAYS", "60"))
 DB_CLEANUP_EVERY_MIN = int(os.getenv("DB_CLEANUP_EVERY_MIN", "60"))
 logger = logging.getLogger(__name__)
@@ -33,14 +34,7 @@ def _user_local_now(timezone_name: str) -> dt.datetime:
 
 
 def _effective_tz_name(raw: str | None) -> str:
-  tz = str(raw or "").strip() or "UTC"
-  if tz == "UTC":
-    tz = TZ
-  try:
-    ZoneInfo(tz)
-    return tz
-  except Exception:
-    return "UTC"
+  return canonical_tz_name(raw or TZ, fallback_to_env=True)
 
 
 def _in_quiet_hours(s: dict, local_now: dt.datetime) -> bool:

@@ -26,6 +26,7 @@ from . import db
 from . import monitoring
 from .digest import cluster_posts, format_digest
 from .i18n import norm_lang, t
+from .tz_utils import canonical_tz_name, is_valid_timezone
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 DIGEST_TOPK_HOURLY = int(os.getenv("DIGEST_TOPK_HOURLY", "8"))
@@ -130,16 +131,12 @@ def parse_channel_ref(raw: str | None) -> str | None:
 
 def _ensure_user_and_lang(user_id: int, tg_lang: str | None = None) -> str:
   created = db.ensure_user(user_id)
-  default_tz = os.getenv("TZ", "UTC")
-  if default_tz and default_tz != "UTC":
-    try:
-      ZoneInfo(default_tz)
-      sch = db.get_schedule(user_id)
-      cur_tz = str(sch.get("timezone", "UTC"))
-      if created or cur_tz == "UTC":
-        db.set_timezone(user_id, default_tz)
-    except Exception:
-      pass
+  default_tz = canonical_tz_name(os.getenv("TZ", "UTC"), fallback_to_env=False)
+  if default_tz != "UTC":
+    sch = db.get_schedule(user_id)
+    cur_tz = canonical_tz_name(str(sch.get("timezone", "UTC")), fallback_to_env=False)
+    if created or cur_tz == "UTC":
+      db.set_timezone(user_id, default_tz)
   if created and tg_lang:
     db.set_lang(user_id, norm_lang(tg_lang))
   return db.get_lang(user_id)
@@ -174,14 +171,7 @@ def _scope_title(lang: str, scope: str) -> str:
 
 
 def _effective_tz_name(raw: str | None) -> str:
-  tz = str(raw or "").strip() or "UTC"
-  if tz == "UTC":
-    tz = str(os.getenv("TZ", "UTC")).strip() or "UTC"
-  try:
-    ZoneInfo(tz)
-    return tz
-  except Exception:
-    return "UTC"
+  return canonical_tz_name(raw, fallback_to_env=True)
 
 
 def _fmt_dt_human(d: dt.datetime, lang: str) -> str:
@@ -530,7 +520,7 @@ def _dev_status_text(user_id: int, lang: str) -> str:
   st = db.status_summary(user_id)
   sch = db.get_schedule(user_id)
   s = db.get_user_settings(user_id)
-  tz = str(sch.get("timezone", "UTC"))
+  tz = _effective_tz_name(str(sch.get("timezone", "UTC")))
   try:
     local_now = dt.datetime.now(dt.timezone.utc).astimezone(ZoneInfo(tz))
   except Exception:
@@ -889,14 +879,12 @@ def make_bot_and_dp() -> tuple[Bot, Dispatcher]:
     arg = (command.args or "").strip()
     if not arg:
       sch = db.get_schedule(m.from_user.id)
-      await m.answer(f"{t(lang, 'status_timezone')}: {sch.get('timezone', 'UTC')}")
+      await m.answer(f"{t(lang, 'status_timezone')}: {_effective_tz_name(str(sch.get('timezone', 'UTC')))}")
       return
-    try:
-      ZoneInfo(arg)
-    except Exception:
+    if not is_valid_timezone(arg):
       await m.answer(t(lang, "tz_invalid"))
       return
-    db.set_timezone(m.from_user.id, arg)
+    db.set_timezone(m.from_user.id, canonical_tz_name(arg, fallback_to_env=False))
     hourly_on, daily_on = db.get_user_flags(m.from_user.id)
     await m.answer(
       _settings_result_text(m.from_user.id, lang, "schedule"),

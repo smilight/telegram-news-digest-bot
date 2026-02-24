@@ -7,6 +7,7 @@ from . import db
 from .collector import Collector
 from .bot import make_bot_and_dp
 from .scheduler import setup_scheduler
+from .tz_utils import canonical_tz_name
 
 def parse_args():
   ap = argparse.ArgumentParser()
@@ -15,7 +16,7 @@ def parse_args():
 
 async def run_login_only():
   db.init_db()
-  db.backfill_user_timezone(os.getenv("TZ", "UTC"))
+  db.backfill_user_timezone(canonical_tz_name(os.getenv("TZ", "UTC"), fallback_to_env=False))
   c = Collector()
   await c.ensure_login_interactive()
   print("✅ Telethon login OK. Session saved. Now run: docker compose up -d")
@@ -29,7 +30,7 @@ async def main():
       raise SystemExit(f"Missing env var {key}. Fill .env and run docker compose up.")
 
   db.init_db()
-  db.backfill_user_timezone(os.getenv("TZ", "UTC"))
+  db.backfill_user_timezone(canonical_tz_name(os.getenv("TZ", "UTC"), fallback_to_env=False))
 
   if args.login:
     await run_login_only()

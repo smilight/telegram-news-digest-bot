@@ -7,7 +7,7 @@ services:
       - TG_API_ID=${TG_API_ID}
       - TG_API_HASH=${TG_API_HASH}
       - BOT_TOKEN=${BOT_TOKEN}
-      - TZ=Europe/Kiev
+      - TZ=${TZ:-Europe/Kyiv}
       - DB_PATH=/data/app.db
       - TELETHON_SESSION=/data/telethon.session
       - COLLECTOR_POLL_SECONDS=120
