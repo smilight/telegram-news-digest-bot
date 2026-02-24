@@ -31,6 +31,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 DIGEST_TOPK_HOURLY = int(os.getenv("DIGEST_TOPK_HOURLY", "8"))
 DIGEST_TOPK_DAILY = int(os.getenv("DIGEST_TOPK_DAILY", "15"))
 DIGEST_MEDIA_PREVIEW_MAX = int(os.getenv("DIGEST_MEDIA_PREVIEW_MAX", "3"))
+DIGEST_INLINE_PREVIEW = int(os.getenv("DIGEST_INLINE_PREVIEW", "1"))
 
 RE_CH = re.compile(r"@?([A-Za-z0-9_]{4,32})")
 RE_CH_FULL = re.compile(r"^@?([A-Za-z0-9_]{4,32})$")
@@ -172,14 +173,18 @@ def _media_preview_links(clusters, max_links: int) -> list[str]:
   seen = set()
   ordered = rank_clusters(list(clusters))
   for c in ordered:
-    rep = c.rep or {}
-    txt = str(rep.get("text") or "")
-    link = str(rep.get("link") or "")
-    if not link or link in seen:
-      continue
-    if _contains_media_marker(txt):
-      seen.add(link)
-      links.append(link)
+    picked = None
+    for it in c.items:
+      txt = str(it.get("text") or "")
+      link = str(it.get("link") or "")
+      if not link or link in seen:
+        continue
+      if _contains_media_marker(txt):
+        picked = link
+        break
+    if picked:
+      seen.add(picked)
+      links.append(picked)
       if len(links) >= max_links:
         break
   return links
@@ -250,12 +255,14 @@ async def send_digest(
   title = f"{title_prefix} ({scope_title}) • {t(lang, 'for_hours').format(hours=hours)} • {end_local.strftime('%d.%m.%Y %H:%M')}"
   text = format_digest(title, clusters, top_k=top_k, lang=lang)
   db.incr_metric("digests_generated", 1)
+  inline_preview = bool(DIGEST_INLINE_PREVIEW)
   media_links = _media_preview_links(clusters, max_links=max(0, int(DIGEST_MEDIA_PREVIEW_MAX)))
+  if inline_preview and media_links:
+    # Telegram shows preview from one link in a text message; put media link first.
+    text = f"{media_links[0]}\n\n{text}"
 
   if len(text) <= 3800:
-    await bot.send_message(user_id, text, disable_web_page_preview=True)
-    for link in media_links:
-      await bot.send_message(user_id, link, disable_web_page_preview=False)
+    await bot.send_message(user_id, text, disable_web_page_preview=not inline_preview)
     return
 
   chunks, cur = [], ""
@@ -270,10 +277,7 @@ async def send_digest(
     chunks.append(cur.strip())
 
   for chunk in chunks:
-    await bot.send_message(user_id, chunk, disable_web_page_preview=True)
-
-  for link in media_links:
-    await bot.send_message(user_id, link, disable_web_page_preview=False)
+    await bot.send_message(user_id, chunk, disable_web_page_preview=not inline_preview)
 
 
 def menu_kb(hourly_on: bool, daily_on: bool, lang: str = "en", view: str = "main"):
