@@ -183,6 +183,26 @@ def _format_period(period_min: int) -> str:
   return f"{period_min}m"
 
 
+def _parse_period_min(raw: str | None) -> int | None:
+  if raw is None:
+    return None
+  s = raw.strip().lower()
+  if not s:
+    return None
+  if re.fullmatch(r"\d+", s):
+    return max(1, int(s))
+  m = re.fullmatch(r"(\d+)\s*([mhd])", s)
+  if not m:
+    return None
+  n = max(1, int(m.group(1)))
+  unit = m.group(2)
+  if unit == "m":
+    return n
+  if unit == "h":
+    return n * 60
+  return n * 1440
+
+
 def build_monitor_text(lang: str, events: List[Dict[str, object]], period_min: int, compact: bool = True) -> str:
   header = f"{t(lang, 'monitor_title')} ({_format_period(period_min)})"
   if not events:
@@ -466,7 +486,14 @@ async def monitor_command(message: Message, args: str, parse_channel_ref):
     return
 
   if cmd == "now":
-    await send_monitoring_summary(message.bot, uid, period_min=int(db.get_user_settings(uid).get("monitor_interval_min", 2)), force=True)
+    mins = int(db.get_user_settings(uid).get("monitor_interval_min", 2))
+    if len(parts) >= 2:
+      parsed = _parse_period_min(parts[1])
+      if parsed is None:
+        await message.answer(t(lang, "monitor_report_format"))
+        return
+      mins = parsed
+    await send_monitoring_summary(message.bot, uid, period_min=mins, force=True)
     return
 
   await message.answer(t(lang, "monitor_format"))

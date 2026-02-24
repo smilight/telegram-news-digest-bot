@@ -34,7 +34,8 @@ lang TEXT NOT NULL DEFAULT 'en',
 timezone TEXT NOT NULL DEFAULT 'UTC',
 quiet_hours_enabled INTEGER NOT NULL DEFAULT 0,
 quiet_start TEXT NOT NULL DEFAULT '23:00',
-quiet_end TEXT NOT NULL DEFAULT '07:00'
+quiet_end TEXT NOT NULL DEFAULT '07:00',
+noise_keywords TEXT
 );
 
 CREATE TABLE IF NOT EXISTS user_channels (
@@ -177,6 +178,7 @@ def _ensure_user_columns(conn):
     "quiet_hours_enabled": "INTEGER NOT NULL DEFAULT 0",
     "quiet_start": "TEXT NOT NULL DEFAULT '23:00'",
     "quiet_end": "TEXT NOT NULL DEFAULT '07:00'",
+    "noise_keywords": "TEXT",
     "monitor_enabled": "INTEGER NOT NULL DEFAULT 0",
     "monitor_interval_min": "INTEGER NOT NULL DEFAULT 2",
     "monitor_last_slot": "TEXT",
@@ -339,6 +341,17 @@ def list_all_tracked_channels() -> List[str]:
   with connect() as conn:
     rows = conn.execute("SELECT DISTINCT username FROM user_channels ORDER BY username").fetchall()
     return [r["username"] for r in rows]
+
+
+def list_all_collected_channels() -> List[str]:
+  with connect() as conn:
+    rows_main = conn.execute("SELECT DISTINCT username FROM user_channels").fetchall()
+    rows_mon = []
+    if _table_exists(conn, "user_monitor_channels"):
+      rows_mon = conn.execute("SELECT DISTINCT username FROM user_monitor_channels").fetchall()
+    merged = {str(r["username"]) for r in rows_main}
+    merged.update({str(r["username"]) for r in rows_mon})
+    return sorted([x for x in merged if x])
 
 def upsert_channel_meta(username: str, tg_id: Optional[int], title: Optional[str]):
   with connect() as conn:
@@ -512,12 +525,14 @@ def set_originals_only(user_id: int, enabled: bool):
   with connect() as conn:
     conn.execute("UPDATE users SET originals_only=? WHERE user_id=?", (1 if enabled else 0, user_id))
 
-def set_keywords(user_id: int, include: str | None = None, exclude: str | None = None):
+def set_keywords(user_id: int, include: str | None = None, exclude: str | None = None, noise: str | None = None):
   with connect() as conn:
     if include is not None:
       conn.execute("UPDATE users SET include_keywords=? WHERE user_id=?", (include, int(user_id)))
     if exclude is not None:
       conn.execute("UPDATE users SET exclude_keywords=? WHERE user_id=?", (exclude, int(user_id)))
+    if noise is not None:
+      conn.execute("UPDATE users SET noise_keywords=? WHERE user_id=?", (noise, int(user_id)))
 
 def get_user_settings(user_id: int) -> Dict[str, object]:
   with connect() as conn:
@@ -527,6 +542,7 @@ def get_user_settings(user_id: int) -> Dict[str, object]:
              originals_only, include_keywords, exclude_keywords,
              last_hourly_sent_hour,last_daily_sent_date,
              timezone, quiet_hours_enabled, quiet_start, quiet_end,
+             noise_keywords,
              monitor_enabled, monitor_interval_min, monitor_last_slot, monitor_pause_until_utc,
              monitor_include_keywords, monitor_exclude_keywords, monitor_categories,
              monitor_antiflood_min

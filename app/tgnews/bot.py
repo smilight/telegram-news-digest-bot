@@ -46,6 +46,8 @@ class AddRemoveFlow(StatesGroup):
   waiting_daily_time = State()
   waiting_include_kw = State()
   waiting_exclude_kw = State()
+  waiting_noise_kw = State()
+  waiting_quiet_range = State()
 
 
 def now_utc() -> dt.datetime:
@@ -78,6 +80,26 @@ def parse_topic_arg(args: str | None) -> str | None:
     if low.startswith("topic:") and len(part) > 6:
       return part.split(":", 1)[1].strip().lower()
   return None
+
+
+def parse_monitor_period_arg(raw: str | None) -> int | None:
+  if raw is None:
+    return 60
+  s = raw.strip().lower()
+  if not s:
+    return 60
+  if re.fullmatch(r"\d+", s):
+    return max(1, int(s))
+  m = re.fullmatch(r"(\d+)\s*([mhd])", s)
+  if not m:
+    return None
+  n = max(1, int(m.group(1)))
+  unit = m.group(2)
+  if unit == "m":
+    return n
+  if unit == "h":
+    return n * 60
+  return n * 1440
 
 
 def parse_channel_ref(raw: str | None) -> str | None:
@@ -161,6 +183,7 @@ async def send_digest(
 
   inc = (settings.get("include_keywords") or "").strip()
   exc = (settings.get("exclude_keywords") or "").strip()
+  noise = (settings.get("noise_keywords") or "").strip()
 
   def _match_any(text: str, csv: str) -> bool:
     kws = [k.strip().lower() for k in csv.split(",") if k.strip()]
@@ -171,6 +194,8 @@ async def send_digest(
     posts = [p for p in posts if _match_any(p.get("text", ""), inc)]
   if exc:
     posts = [p for p in posts if not _match_any(p.get("text", ""), exc)]
+  if noise:
+    posts = [p for p in posts if not _match_any(p.get("text", ""), noise)]
 
   if topic_name:
     topic = db.get_topic_profile(user_id, topic_name)
@@ -264,6 +289,9 @@ def menu_kb(hourly_on: bool, daily_on: bool, lang: str = "en", view: str = "main
     kb.button(text=t(lang, "menu_schedule"), callback_data="nav:schedule")
     kb.button(text=t(lang, "menu_keywords"), callback_data="nav:keywords")
     kb.adjust(2)
+    kb.button(text=t(lang, "menu_quiet"), callback_data="nav:quiet")
+    kb.button(text=t(lang, "menu_topics"), callback_data="nav:topics")
+    kb.adjust(2)
     kb.button(text=t(lang, "menu_breaking"), callback_data="nav:breaking")
     kb.button(text=t(lang, "originals_toggle"), callback_data="toggle:originals")
     kb.adjust(2)
@@ -280,6 +308,25 @@ def menu_kb(hourly_on: bool, daily_on: bool, lang: str = "en", view: str = "main
   elif view == "keywords":
     kb.button(text=t(lang, "kw_include"), callback_data="kw:include")
     kb.button(text=t(lang, "kw_exclude"), callback_data="kw:exclude")
+    kb.adjust(2)
+    kb.button(text=t(lang, "kw_noise"), callback_data="kw:noise")
+    kb.adjust(1)
+    kb.button(text=t(lang, "kw_help"), callback_data="kw:help")
+    kb.adjust(1)
+    kb.button(text=t(lang, "menu_back"), callback_data="nav:settings")
+    kb.adjust(1)
+  elif view == "quiet":
+    kb.button(text=t(lang, "quiet_toggle_on"), callback_data="quiet:on")
+    kb.button(text=t(lang, "quiet_toggle_off"), callback_data="quiet:off")
+    kb.adjust(2)
+    kb.button(text=t(lang, "quiet_set_default"), callback_data="quiet:set:23:00:07:00")
+    kb.button(text=t(lang, "quiet_set_custom"), callback_data="quiet:custom")
+    kb.adjust(1, 1)
+    kb.button(text=t(lang, "menu_back"), callback_data="nav:settings")
+    kb.adjust(1)
+  elif view == "topics":
+    kb.button(text=t(lang, "topic_list_btn"), callback_data="topic:list")
+    kb.button(text=t(lang, "topic_help_btn"), callback_data="topic:help")
     kb.adjust(2)
     kb.button(text=t(lang, "menu_back"), callback_data="nav:settings")
     kb.adjust(1)
@@ -307,6 +354,18 @@ def menu_kb(hourly_on: bool, daily_on: bool, lang: str = "en", view: str = "main
     kb.button(text=t(lang, "monitor_report_2h"), callback_data="mon:report:120")
     kb.button(text=t(lang, "monitor_report_24h"), callback_data="mon:report:1440")
     kb.adjust(3)
+    kb.button(text=t(lang, "menu_back"), callback_data="nav:main")
+    kb.adjust(1)
+  elif view == "status":
+    kb.button(text=t(lang, "status_refresh"), callback_data="status")
+    kb.button(text=t(lang, "status_dev_btn"), callback_data="devstatus")
+    kb.adjust(2)
+    kb.button(text=t(lang, "menu_back"), callback_data="nav:main")
+    kb.adjust(1)
+  elif view == "devstatus":
+    kb.button(text=t(lang, "status_refresh"), callback_data="devstatus")
+    kb.button(text=t(lang, "status_back_btn"), callback_data="status")
+    kb.adjust(2)
     kb.button(text=t(lang, "menu_back"), callback_data="nav:main")
     kb.adjust(1)
   else:
@@ -366,6 +425,9 @@ def _status_text(user_id: int, lang: str, hourly_on: bool, daily_on: bool) -> st
     txt += f"{t(lang, 'status_include')}: {inc}\n"
   if exc:
     txt += f"{t(lang, 'status_exclude')}: {exc}\n"
+  noise = (s.get("noise_keywords") or "").strip()
+  if noise:
+    txt += f"{t(lang, 'status_noise')}: {noise}\n"
   topics = db.list_topic_profiles(user_id)
   if topics:
     txt += f"{t(lang, 'status_topics')}: {len(topics)}\n"
@@ -392,10 +454,109 @@ def _monitoring_text(user_id: int, lang: str) -> str:
   )
 
 
+def _dev_status_text(user_id: int, lang: str) -> str:
+  metrics = db.get_metrics()
+  st = db.status_summary(user_id)
+  sch = db.get_schedule(user_id)
+  s = db.get_user_settings(user_id)
+  tz = str(sch.get("timezone", "UTC"))
+  now = now_utc().strftime("%Y-%m-%d %H:%M:%SZ")
+  return (
+    f"{t(lang, 'dev_status_title')}\n"
+    f"• now_utc={now}\n"
+    f"• tz={tz}\n"
+    f"• monitor_enabled={bool(s.get('monitor_enabled', 0))}\n"
+    f"• monitor_interval_min={int(s.get('monitor_interval_min', 2))}\n"
+    f"• monitor_antiflood_min={int(s.get('monitor_antiflood_min', 7))}\n"
+    f"• posts_24h={st['posts_24h']}\n"
+    f"• channels(hourly/daily)={st['hourly_channels']}/{st['daily_channels']}\n"
+    f"• posts_collected={metrics.get('posts_collected', 0)}\n"
+    f"• digests_generated={metrics.get('digests_generated', 0)}\n"
+    f"• digests_hourly_sent={metrics.get('digests_hourly_sent', 0)}\n"
+    f"• digests_daily_sent={metrics.get('digests_daily_sent', 0)}\n"
+    f"• alerts_sent={metrics.get('alerts_sent', 0)}\n"
+    f"• monitor_sent={metrics.get('monitor_sent', 0)}\n"
+    f"• monitor_report_sent={metrics.get('monitor_report_sent', 0)}"
+  )
+
+
+def _menu_view_text(user_id: int, lang: str, view: str) -> str:
+  if view == "main":
+    return t(lang, "menu_desc_main")
+  if view == "channels":
+    return t(lang, "menu_desc_channels")
+  if view == "digest":
+    return t(lang, "menu_desc_digest")
+  if view == "settings":
+    return t(lang, "menu_desc_settings")
+  if view == "schedule":
+    sch = db.get_schedule(user_id)
+    return (
+      f"{t(lang, 'menu_desc_schedule')}\n"
+      f"• {t(lang, 'status_hourly_min')}: {int(sch.get('hourly_minute', 2)):02d}\n"
+      f"• {t(lang, 'status_daily_time')}: {sch.get('daily_time', '09:00')}"
+    )
+  if view == "keywords":
+    s = db.get_user_settings(user_id)
+    inc = (s.get("include_keywords") or "").strip() or "-"
+    exc = (s.get("exclude_keywords") or "").strip() or "-"
+    noise = (s.get("noise_keywords") or "").strip() or "-"
+    return (
+      f"{t(lang, 'menu_desc_keywords')}\n"
+      f"• {t(lang, 'status_include')}: {inc}\n"
+      f"• {t(lang, 'status_exclude')}: {exc}\n"
+      f"• {t(lang, 'status_noise')}: {noise}"
+    )
+  if view == "quiet":
+    return f"{t(lang, 'menu_desc_quiet')}\n\n{_quiet_text(user_id, lang)}"
+  if view == "topics":
+    cnt = len(db.list_topic_profiles(user_id))
+    return f"{t(lang, 'menu_desc_topics')}\n• {t(lang, 'status_topics')}: {cnt}"
+  if view == "breaking":
+    s = db.get_user_settings(user_id)
+    return (
+      f"{t(lang, 'menu_desc_breaking')}\n"
+      f"• {t(lang, 'status_breaking')}: {bool(s.get('breaking_enabled', 0))}\n"
+      f"• {t(lang, 'status_breaking_sources')}: {int(s.get('breaking_sources', 8))}\n"
+      f"• {t(lang, 'status_breaking_window')}: {int(s.get('breaking_window_min', 10))}"
+    )
+  if view == "monitor":
+    return f"{t(lang, 'menu_desc_monitor')}\n\n{_monitoring_text(user_id, lang)}"
+  if view == "status":
+    hourly_on, daily_on = db.get_user_flags(user_id)
+    return _status_text(user_id, lang, hourly_on, daily_on)
+  if view == "devstatus":
+    return _dev_status_text(user_id, lang)
+  return t(lang, "menu_hint")
+
+
+def _quiet_text(user_id: int, lang: str) -> str:
+  sch = db.get_schedule(user_id)
+  return (
+    f"{t(lang, 'status_quiet')}: {bool(sch.get('quiet_hours_enabled', 0))}\n"
+    f"• {sch.get('quiet_start', '23:00')}–{sch.get('quiet_end', '07:00')}\n"
+    f"{t(lang, 'quiet_hint')}"
+  )
+
+
+def _topics_list_text(user_id: int, lang: str) -> str:
+  items = db.list_topic_profiles(user_id)
+  if not items:
+    return t(lang, "topic_empty")
+  lines = [t(lang, "topic_title")]
+  for it in items:
+    lines.append(
+      f"• {it['name']} [{it['scope']}] enabled={bool(it['enabled'])} "
+      f"+({(it.get('include_keywords') or '').strip() or '-'}) "
+      f"-({(it.get('exclude_keywords') or '').strip() or '-'})"
+    )
+  return "\n".join(lines)
+
+
 async def _send_main_menu(message: Message, lang: str):
   hourly_on, daily_on = db.get_user_flags(message.from_user.id)
   await message.answer(
-    t(lang, "menu_hint"),
+    _menu_view_text(message.from_user.id, lang, "main"),
     reply_markup=menu_kb(hourly_on, daily_on, lang, view="main"),
   )
 
@@ -404,6 +565,7 @@ async def _configure_telegram_chat_ui(bot: Bot, user_id: int, lang: str):
   # Telegram left-side menu button with command list.
   await bot.set_chat_menu_button(chat_id=user_id, menu_button=MenuButtonCommands())
   commands = [
+    BotCommand(command="help", description=t(lang, "cmd_help_desc")),
     BotCommand(command="menu", description=t(lang, "cmd_menu_desc")),
     BotCommand(command="monitor", description=t(lang, "cmd_monitor_desc")),
     BotCommand(command="mreport", description=t(lang, "cmd_mreport_desc")),
@@ -439,13 +601,23 @@ def make_bot_and_dp() -> tuple[Bot, Dispatcher]:
     lang = _ensure_user_and_lang(m.from_user.id, getattr(m.from_user, "language_code", None))
     await _send_main_menu(m, lang)
 
+  @dp.message(Command("help"))
+  async def help_cmd(m: Message):
+    lang = _ensure_user_and_lang(m.from_user.id, getattr(m.from_user, "language_code", None))
+    hourly_on, daily_on = db.get_user_flags(m.from_user.id)
+    await m.answer(
+      build_help(lang),
+      reply_markup=menu_kb(hourly_on, daily_on, lang, view="main"),
+      disable_web_page_preview=True,
+    )
+
   @dp.message(Command("status"))
   async def status_cmd(m: Message):
     lang = _ensure_user_and_lang(m.from_user.id, getattr(m.from_user, "language_code", None))
     hourly_on, daily_on = db.get_user_flags(m.from_user.id)
     await m.answer(
       _status_text(m.from_user.id, lang, hourly_on, daily_on),
-      reply_markup=menu_kb(hourly_on, daily_on, lang),
+      reply_markup=menu_kb(hourly_on, daily_on, lang, view="status"),
       disable_web_page_preview=True,
     )
 
@@ -559,16 +731,19 @@ def make_bot_and_dp() -> tuple[Bot, Dispatcher]:
       await m.answer(t(lang, "kw_format"))
       return
     parts = command.args.split(maxsplit=1)
-    if len(parts) != 2 or parts[0].lower() not in ("include", "exclude"):
+    if len(parts) != 2 or parts[0].lower() not in ("include", "exclude", "noise"):
       await m.answer(t(lang, "kw_format"))
       return
     mode, value = parts[0].lower(), parts[1].strip()
     if mode == "include":
       db.set_keywords(m.from_user.id, include=value)
       await m.answer(t(lang, "include_set"))
-    else:
+    elif mode == "exclude":
       db.set_keywords(m.from_user.id, exclude=value)
       await m.answer(t(lang, "exclude_set"))
+    else:
+      db.set_keywords(m.from_user.id, noise=value)
+      await m.answer(t(lang, "noise_set"))
 
   @dp.message(Command("set"))
   async def set_cmd(m: Message, command: CommandObject):
@@ -642,18 +817,7 @@ def make_bot_and_dp() -> tuple[Bot, Dispatcher]:
     lang = _ensure_user_and_lang(m.from_user.id, getattr(m.from_user, "language_code", None))
     args = (command.args or "").strip()
     if not args:
-      items = db.list_topic_profiles(m.from_user.id)
-      if not items:
-        await m.answer(t(lang, "topic_empty"))
-        return
-      lines = [t(lang, "topic_title")]
-      for it in items:
-        lines.append(
-          f"• {it['name']} [{it['scope']}] enabled={bool(it['enabled'])} "
-          f"+({(it.get('include_keywords') or '').strip() or '-'}) "
-          f"-({(it.get('exclude_keywords') or '').strip() or '-'})"
-        )
-      await m.answer("\n".join(lines))
+      await m.answer(_topics_list_text(m.from_user.id, lang) + "\n\n" + t(lang, "topic_help"))
       return
 
     parts = args.split(maxsplit=2)
@@ -725,10 +889,8 @@ def make_bot_and_dp() -> tuple[Bot, Dispatcher]:
   @dp.message(Command("mreport"))
   async def mreport_cmd(m: Message, command: CommandObject):
     lang = _ensure_user_and_lang(m.from_user.id, getattr(m.from_user, "language_code", None))
-    arg = (command.args or "60").strip().lower()
-    table = {"1h": 60, "2h": 120, "24h": 1440, "60": 60, "120": 120, "1440": 1440}
-    mins = table.get(arg)
-    if not mins:
+    mins = parse_monitor_period_arg(command.args)
+    if mins is None:
       await m.answer(t(lang, "monitor_report_format"))
       return
     await monitoring.send_monitoring_report(bot, m.from_user.id, mins)
@@ -780,10 +942,7 @@ def make_bot_and_dp() -> tuple[Bot, Dispatcher]:
 
     if data.startswith("nav:"):
       view = data.split(":", 1)[1]
-      if view == "monitor":
-        await q.message.answer(_monitoring_text(user_id, lang), reply_markup=menu_kb(hourly_on, daily_on, lang, view="monitor"))
-      else:
-        await q.message.answer(t(lang, "menu_hint"), reply_markup=menu_kb(hourly_on, daily_on, lang, view=view))
+      await q.message.answer(_menu_view_text(user_id, lang, view), reply_markup=menu_kb(hourly_on, daily_on, lang, view=view))
       await q.answer()
       return
 
@@ -923,6 +1082,56 @@ def make_bot_and_dp() -> tuple[Bot, Dispatcher]:
       await q.answer()
       return
 
+    if data == "kw:noise":
+      await state.set_state(AddRemoveFlow.waiting_noise_kw)
+      await q.message.answer(t(lang, "send_kw_noise"))
+      await q.answer()
+      return
+
+    if data == "kw:help":
+      await q.message.answer(t(lang, "kw_help_text"), reply_markup=menu_kb(hourly_on, daily_on, lang, view="keywords"))
+      await q.answer()
+      return
+
+    if data == "quiet:on":
+      db.set_quiet_hours(user_id, True)
+      await q.message.answer(_quiet_text(user_id, lang), reply_markup=menu_kb(hourly_on, daily_on, lang, view="quiet"))
+      await q.answer()
+      return
+
+    if data == "quiet:off":
+      db.set_quiet_hours(user_id, False)
+      await q.message.answer(_quiet_text(user_id, lang), reply_markup=menu_kb(hourly_on, daily_on, lang, view="quiet"))
+      await q.answer()
+      return
+
+    if data == "quiet:custom":
+      await state.set_state(AddRemoveFlow.waiting_quiet_range)
+      await q.message.answer(t(lang, "send_quiet_range"))
+      await q.answer()
+      return
+
+    if data.startswith("quiet:set:"):
+      parts = data.split(":")
+      if len(parts) == 6:
+        start = f"{parts[2]}:{parts[3]}"
+        end = f"{parts[4]}:{parts[5]}"
+        if re.fullmatch(r"([01]\d|2[0-3]):([0-5]\d)", start) and re.fullmatch(r"([01]\d|2[0-3]):([0-5]\d)", end):
+          db.set_quiet_hours(user_id, True, start_hhmm=start, end_hhmm=end)
+      await q.message.answer(_quiet_text(user_id, lang), reply_markup=menu_kb(hourly_on, daily_on, lang, view="quiet"))
+      await q.answer()
+      return
+
+    if data == "topic:list":
+      await q.message.answer(_topics_list_text(user_id, lang), reply_markup=menu_kb(hourly_on, daily_on, lang, view="topics"))
+      await q.answer()
+      return
+
+    if data == "topic:help":
+      await q.message.answer(t(lang, "topic_help"), reply_markup=menu_kb(hourly_on, daily_on, lang, view="topics"))
+      await q.answer()
+      return
+
     if data.startswith("mute_brk:"):
       alert_key = data.split("mute_brk:", 1)[1]
       db.mute_alert(user_id, alert_key)
@@ -949,7 +1158,16 @@ def make_bot_and_dp() -> tuple[Bot, Dispatcher]:
       hourly_on, daily_on = db.get_user_flags(user_id)
       await q.message.answer(
         _status_text(user_id, lang, hourly_on, daily_on),
-        reply_markup=menu_kb(hourly_on, daily_on, lang, view="main"),
+        reply_markup=menu_kb(hourly_on, daily_on, lang, view="status"),
+      )
+      await q.answer()
+      return
+
+    if data == "devstatus":
+      hourly_on, daily_on = db.get_user_flags(user_id)
+      await q.message.answer(
+        _dev_status_text(user_id, lang),
+        reply_markup=menu_kb(hourly_on, daily_on, lang, view="devstatus"),
       )
       await q.answer()
       return
@@ -1102,6 +1320,32 @@ def make_bot_and_dp() -> tuple[Bot, Dispatcher]:
     await state.clear()
     hourly_on, daily_on = db.get_user_flags(m.from_user.id)
     await m.answer(t(lang, "exclude_set"), reply_markup=menu_kb(hourly_on, daily_on, lang, view="keywords"))
+
+  @dp.message(AddRemoveFlow.waiting_noise_kw)
+  async def set_noise_kw_flow(m: Message, state: FSMContext):
+    lang = db.get_lang(m.from_user.id)
+    txt = (m.text or "").strip()
+    db.set_keywords(m.from_user.id, noise=txt if txt else "")
+    await state.clear()
+    hourly_on, daily_on = db.get_user_flags(m.from_user.id)
+    await m.answer(t(lang, "noise_set"), reply_markup=menu_kb(hourly_on, daily_on, lang, view="keywords"))
+
+  @dp.message(AddRemoveFlow.waiting_quiet_range)
+  async def set_quiet_range_flow(m: Message, state: FSMContext):
+    lang = db.get_lang(m.from_user.id)
+    txt = (m.text or "").strip()
+    parts = txt.split()
+    if len(parts) != 2:
+      await m.answer(t(lang, "quiet_format"))
+      return
+    start, end = parts[0], parts[1]
+    if not re.fullmatch(r"([01]\d|2[0-3]):([0-5]\d)", start) or not re.fullmatch(r"([01]\d|2[0-3]):([0-5]\d)", end):
+      await m.answer(t(lang, "quiet_format"))
+      return
+    db.set_quiet_hours(m.from_user.id, True, start_hhmm=start, end_hhmm=end)
+    await state.clear()
+    hourly_on, daily_on = db.get_user_flags(m.from_user.id)
+    await m.answer(_quiet_text(m.from_user.id, lang), reply_markup=menu_kb(hourly_on, daily_on, lang, view="quiet"))
 
   @dp.message()
   async def fallback(m: Message):

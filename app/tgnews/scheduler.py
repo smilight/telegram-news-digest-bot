@@ -172,59 +172,71 @@ def setup_scheduler(bot):
     now = _now_local()
 
     for uid in db.list_users_with_flag("hourly_enabled"):
-      sch = db.get_schedule(uid)
-      local_now = _user_local_now(str(sch.get("timezone", "UTC")))
-      if _in_quiet_hours(sch, local_now):
+      try:
+        sch = db.get_schedule(uid)
+        local_now = _user_local_now(str(sch.get("timezone", "UTC")))
+        if _in_quiet_hours(sch, local_now):
+          continue
+        if int(sch.get("hourly_minute", 2)) != local_now.minute:
+          continue
+        hour_key = local_now.strftime("%Y-%m-%dT%H")
+        if sch.get("last_hourly_sent_hour") == hour_key:
+          continue
+        lang = db.get_lang(uid)
+        await send_digest(bot, uid, dt.timedelta(hours=1), top_k=8, title_prefix=t(lang, "hourly_digest"), scope="hourly")
+        db.mark_hourly_sent(uid, hour_key)
+        db.incr_metric("digests_hourly_sent", 1)
+      except Exception:
         continue
-      if int(sch.get("hourly_minute", 2)) != local_now.minute:
-        continue
-      hour_key = local_now.strftime("%Y-%m-%dT%H")
-      if sch.get("last_hourly_sent_hour") == hour_key:
-        continue
-      lang = db.get_lang(uid)
-      await send_digest(bot, uid, dt.timedelta(hours=1), top_k=8, title_prefix=t(lang, "hourly_digest"), scope="hourly")
-      db.mark_hourly_sent(uid, hour_key)
-      db.incr_metric("digests_hourly_sent", 1)
 
     for uid in db.list_users_with_flag("daily_enabled"):
-      sch = db.get_schedule(uid)
-      local_now = _user_local_now(str(sch.get("timezone", "UTC")))
-      if _in_quiet_hours(sch, local_now):
+      try:
+        sch = db.get_schedule(uid)
+        local_now = _user_local_now(str(sch.get("timezone", "UTC")))
+        if _in_quiet_hours(sch, local_now):
+          continue
+        hhmm = local_now.strftime("%H:%M")
+        today_key = local_now.strftime("%Y-%m-%d")
+        if sch.get("daily_time", "09:00") != hhmm:
+          continue
+        if sch.get("last_daily_sent_date") == today_key:
+          continue
+        lang = db.get_lang(uid)
+        await send_digest(bot, uid, dt.timedelta(hours=24), top_k=15, title_prefix=t(lang, "daily_digest"), scope="daily")
+        db.mark_daily_sent(uid, today_key)
+        db.incr_metric("digests_daily_sent", 1)
+      except Exception:
         continue
-      hhmm = local_now.strftime("%H:%M")
-      today_key = local_now.strftime("%Y-%m-%d")
-      if sch.get("daily_time", "09:00") != hhmm:
-        continue
-      if sch.get("last_daily_sent_date") == today_key:
-        continue
-      lang = db.get_lang(uid)
-      await send_digest(bot, uid, dt.timedelta(hours=24), top_k=15, title_prefix=t(lang, "daily_digest"), scope="daily")
-      db.mark_daily_sent(uid, today_key)
-      db.incr_metric("digests_daily_sent", 1)
 
     for uid in db.list_users_monitoring_enabled():
-      s = db.get_user_settings(uid)
-      local_now = _user_local_now(str(s.get("timezone", "UTC")))
-      if _in_quiet_hours(s, local_now):
+      try:
+        s = db.get_user_settings(uid)
+        local_now = _user_local_now(str(s.get("timezone", "UTC")))
+        if _in_quiet_hours(s, local_now):
+          continue
+        pause_until = s.get("monitor_pause_until_utc")
+        if pause_until:
+          try:
+            pu = dt.datetime.fromisoformat(str(pause_until).replace("Z", "+00:00"))
+            if dt.datetime.now(dt.timezone.utc) < pu:
+              continue
+          except Exception:
+            pass
+        interval = max(1, min(30, int(s.get("monitor_interval_min", 2))))
+        if local_now.minute % interval != 0:
+          continue
+        slot_key = local_now.strftime("%Y-%m-%dT%H:%M")
+        if s.get("monitor_last_slot") == slot_key:
+          continue
+        await monitoring.send_monitoring_summary(bot, uid, period_min=interval, force=False)
+        db.mark_monitor_slot(uid, slot_key)
+      except Exception:
         continue
-      pause_until = s.get("monitor_pause_until_utc")
-      if pause_until:
-        try:
-          pu = dt.datetime.fromisoformat(str(pause_until).replace("Z", "+00:00"))
-          if dt.datetime.now(dt.timezone.utc) < pu:
-            continue
-        except Exception:
-          pass
-      interval = max(1, min(30, int(s.get("monitor_interval_min", 2))))
-      if local_now.minute % interval != 0:
-        continue
-      slot_key = local_now.strftime("%Y-%m-%dT%H:%M")
-      if s.get("monitor_last_slot") == slot_key:
-        continue
-      await monitoring.send_monitoring_summary(bot, uid, period_min=interval, force=False)
-      db.mark_monitor_slot(uid, slot_key)
 
-    await _run_breaking(bot)
+    try:
+      await _run_breaking(bot)
+    except Exception:
+      pass
 
   sched.add_job(tick, "cron", second=10)
   return sched

@@ -144,11 +144,11 @@ class Collector:
 
   async def loop(self, stop_event: asyncio.Event):
     await self.ensure_started()
-    for ch in db.list_all_tracked_channels():
+    for ch in db.list_all_collected_channels():
       await self.resolve_and_store_meta(ch)
 
     while not stop_event.is_set():
-      channels = db.list_all_tracked_channels()
+      channels = db.list_all_collected_channels()
       for ch in channels:
         await self.fetch_new_for_channel(ch)
         # update basic stats (24h) occasionally
