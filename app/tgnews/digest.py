@@ -13,6 +13,23 @@ from .text_utils import normalize_text
 
 DEDUP_MODE = os.getenv("DEDUP_MODE", "simhash").strip().lower()  # simhash | embeddings
 
+MEDIA_TAGS = {
+  "[photo]": "📷 photo",
+  "[video]": "🎬 video",
+  "[voice]": "🎤 voice",
+  "[audio]": "🎵 audio",
+  "[sticker]": "🧩 sticker",
+  "[document]": "📄 document",
+  "[media]": "📎 media",
+}
+
+
+def _pretty_media_tags(text: str) -> str:
+  out = text or ""
+  for k, v in MEDIA_TAGS.items():
+    out = out.replace(k, v)
+  return out
+
 def first_sentence(text: str, limit: int = 220) -> str:
   t = text.strip().replace("\n", " ")
   t = " ".join(t.split())
@@ -105,11 +122,11 @@ def rank_clusters(clusters: List[Cluster]) -> List[Cluster]:
 
 def _cluster_summary(c: Cluster, lang: str) -> str:
   texts = []
-  rep = normalize_text(c.rep.get("text", ""))
+  rep = _pretty_media_tags(normalize_text(c.rep.get("text", "")))
   if rep:
     texts.append(first_sentence(rep, limit=180))
   for it in c.items[:4]:
-    txt = normalize_text(it.get("text", ""))
+    txt = _pretty_media_tags(normalize_text(it.get("text", "")))
     if not txt:
       continue
     sent = first_sentence(txt, limit=120)

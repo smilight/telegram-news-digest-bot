@@ -24,12 +24,13 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from . import db
 from . import monitoring
-from .digest import cluster_posts, format_digest
+from .digest import cluster_posts, format_digest, rank_clusters
 from .i18n import norm_lang, t
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 DIGEST_TOPK_HOURLY = int(os.getenv("DIGEST_TOPK_HOURLY", "8"))
 DIGEST_TOPK_DAILY = int(os.getenv("DIGEST_TOPK_DAILY", "15"))
+DIGEST_MEDIA_PREVIEW_MAX = int(os.getenv("DIGEST_MEDIA_PREVIEW_MAX", "3"))
 
 RE_CH = re.compile(r"@?([A-Za-z0-9_]{4,32})")
 RE_CH_FULL = re.compile(r"^@?([A-Za-z0-9_]{4,32})$")
@@ -157,6 +158,33 @@ def _scope_title(lang: str, scope: str) -> str:
   return t(lang, "scope_all")
 
 
+def _contains_media_marker(text: str) -> bool:
+  low = (text or "").lower()
+  markers = (
+    "[photo]", "[video]", "[voice]", "[audio]", "[sticker]", "[document]", "[media]",
+    "📷 photo", "🎬 video", "🎤 voice", "🎵 audio", "🧩 sticker", "📄 document", "📎 media",
+  )
+  return any(m in low for m in markers)
+
+
+def _media_preview_links(clusters, max_links: int) -> list[str]:
+  links: list[str] = []
+  seen = set()
+  ordered = rank_clusters(list(clusters))
+  for c in ordered:
+    rep = c.rep or {}
+    txt = str(rep.get("text") or "")
+    link = str(rep.get("link") or "")
+    if not link or link in seen:
+      continue
+    if _contains_media_marker(txt):
+      seen.add(link)
+      links.append(link)
+      if len(links) >= max_links:
+        break
+  return links
+
+
 async def send_digest(
   bot: Bot,
   user_id: int,
@@ -222,9 +250,12 @@ async def send_digest(
   title = f"{title_prefix} ({scope_title}) • {t(lang, 'for_hours').format(hours=hours)} • {end_local.strftime('%d.%m.%Y %H:%M')}"
   text = format_digest(title, clusters, top_k=top_k, lang=lang)
   db.incr_metric("digests_generated", 1)
+  media_links = _media_preview_links(clusters, max_links=max(0, int(DIGEST_MEDIA_PREVIEW_MAX)))
 
   if len(text) <= 3800:
     await bot.send_message(user_id, text, disable_web_page_preview=True)
+    for link in media_links:
+      await bot.send_message(user_id, link, disable_web_page_preview=False)
     return
 
   chunks, cur = [], ""
@@ -240,6 +271,9 @@ async def send_digest(
 
   for chunk in chunks:
     await bot.send_message(user_id, chunk, disable_web_page_preview=True)
+
+  for link in media_links:
+    await bot.send_message(user_id, link, disable_web_page_preview=False)
 
 
 def menu_kb(hourly_on: bool, daily_on: bool, lang: str = "en", view: str = "main"):

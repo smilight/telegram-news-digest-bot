@@ -44,6 +44,18 @@ def media_placeholder(m: Message) -> str:
     return "[media]"
   return ""
 
+
+def media_label(tag: str) -> str:
+  return {
+    "[photo]": "📷 photo",
+    "[video]": "🎬 video",
+    "[voice]": "🎤 voice",
+    "[audio]": "🎵 audio",
+    "[sticker]": "🧩 sticker",
+    "[document]": "📄 document",
+    "[media]": "📎 media",
+  }.get(tag, tag)
+
 class Collector:
   def __init__(self):
     self.client = TelegramClient(TELETHON_SESSION, TG_API_ID, TG_API_HASH)
@@ -85,6 +97,7 @@ class Collector:
     for m in msgs_sorted:
       raw_text = (m.message or m.raw_text or "").strip()
       media_tag = media_placeholder(m)
+      media_txt = media_label(media_tag) if media_tag else ""
       link = msg_link(username, m.id)
 
       first = first_url(raw_text) if raw_text else None
@@ -93,12 +106,12 @@ class Collector:
 
       if raw_text:
         # Keep media signal in digest text, but dedup by original text.
-        text = f"{raw_text}\n{media_tag}" if media_tag else raw_text
+        text = f"{raw_text}\n{media_txt}" if media_txt else raw_text
         norm_source = raw_text
       else:
         if not media_tag:
           continue
-        text = media_tag
+        text = media_txt
         # Avoid collapsing all media-only posts into one cluster.
         norm_source = f"{media_tag} {link}"
 
