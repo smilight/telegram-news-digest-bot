@@ -15,6 +15,7 @@ def parse_args():
 
 async def run_login_only():
   db.init_db()
+  db.backfill_user_timezone(os.getenv("TZ", "UTC"))
   c = Collector()
   await c.ensure_login_interactive()
   print("✅ Telethon login OK. Session saved. Now run: docker compose up -d")
@@ -28,6 +29,7 @@ async def main():
       raise SystemExit(f"Missing env var {key}. Fill .env and run docker compose up.")
 
   db.init_db()
+  db.backfill_user_timezone(os.getenv("TZ", "UTC"))
 
   if args.login:
     await run_login_only()
