@@ -26,6 +26,7 @@ from . import db
 from . import monitoring
 from .digest import cluster_posts, format_digest
 from .i18n import norm_lang, t
+from .text_utils import mutate_keyword_csv
 from .tz_utils import canonical_tz_name, is_valid_timezone
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
@@ -365,11 +366,18 @@ def menu_kb(hourly_on: bool, daily_on: bool, lang: str = "en", view: str = "main
     kb.button(text=t(lang, "menu_back"), callback_data="nav:settings")
     kb.adjust(1)
   elif view == "keywords":
-    kb.button(text=t(lang, "kw_include"), callback_data="kw:include")
-    kb.button(text=t(lang, "kw_exclude"), callback_data="kw:exclude")
+    kb.button(text=t(lang, "kw_include_add_btn"), callback_data="kw:include:add")
+    kb.button(text=t(lang, "kw_include_rm_btn"), callback_data="kw:include:rm")
     kb.adjust(2)
-    kb.button(text=t(lang, "kw_noise"), callback_data="kw:noise")
-    kb.adjust(1)
+    kb.button(text=t(lang, "kw_exclude_add_btn"), callback_data="kw:exclude:add")
+    kb.button(text=t(lang, "kw_exclude_rm_btn"), callback_data="kw:exclude:rm")
+    kb.adjust(2)
+    kb.button(text=t(lang, "kw_noise_add_btn"), callback_data="kw:noise:add")
+    kb.button(text=t(lang, "kw_noise_rm_btn"), callback_data="kw:noise:rm")
+    kb.adjust(2)
+    kb.button(text=t(lang, "kw_show_btn"), callback_data="kw:show")
+    kb.button(text=t(lang, "kw_clear_all_btn"), callback_data="kw:clearall")
+    kb.adjust(2)
     kb.button(text=t(lang, "kw_help"), callback_data="kw:help")
     kb.adjust(1)
     kb.button(text=t(lang, "menu_back"), callback_data="nav:settings")
@@ -829,20 +837,51 @@ def make_bot_and_dp() -> tuple[Bot, Dispatcher]:
     if not command.args:
       await m.answer(t(lang, "kw_format"))
       return
-    parts = command.args.split(maxsplit=1)
-    if len(parts) != 2 or parts[0].lower() not in ("include", "exclude", "noise"):
+    raw = (command.args or "").strip()
+    parts = raw.split(maxsplit=2)
+    if not parts or parts[0].lower() not in ("include", "exclude", "noise"):
       await m.answer(t(lang, "kw_format"))
       return
-    mode, value = parts[0].lower(), parts[1].strip()
-    if mode == "include":
-      db.set_keywords(m.from_user.id, include=value)
-    elif mode == "exclude":
-      db.set_keywords(m.from_user.id, exclude=value)
+
+    mode = parts[0].lower()
+    action = "set"
+    payload = ""
+    if len(parts) >= 2 and parts[1].lower() in ("set", "add", "rm", "clear", "show"):
+      action = parts[1].lower()
+      payload = parts[2].strip() if len(parts) >= 3 else ""
     else:
-      db.set_keywords(m.from_user.id, noise=value)
+      payload = raw[len(mode):].strip()
+
+    field = "include_keywords" if mode == "include" else ("exclude_keywords" if mode == "exclude" else "noise_keywords")
+    settings = db.get_user_settings(m.from_user.id)
+    current = str(settings.get(field) or "")
+    try:
+      updated = mutate_keyword_csv(current, action, payload)
+    except Exception:
+      await m.answer(t(lang, "kw_format"))
+      return
+
+    if action != "show":
+      if mode == "include":
+        db.set_keywords(m.from_user.id, include=updated)
+      elif mode == "exclude":
+        db.set_keywords(m.from_user.id, exclude=updated)
+      else:
+        db.set_keywords(m.from_user.id, noise=updated)
+
+    settings = db.get_user_settings(m.from_user.id)
+    inc = (settings.get("include_keywords") or "").strip() or "-"
+    exc = (settings.get("exclude_keywords") or "").strip() or "-"
+    noi = (settings.get("noise_keywords") or "").strip() or "-"
+    msg = (
+      f"{t(lang, 'saved')}\n\n"
+      f"{t(lang, 'status_include')}: {inc}\n"
+      f"{t(lang, 'status_exclude')}: {exc}\n"
+      f"{t(lang, 'status_noise')}: {noi}"
+    )
     hourly_on, daily_on = db.get_user_flags(m.from_user.id)
     await m.answer(
-      _settings_result_text(m.from_user.id, lang, "keywords"),
+      msg,
       reply_markup=menu_kb(hourly_on, daily_on, lang, view="keywords"),
     )
 
@@ -1178,21 +1217,43 @@ def make_bot_and_dp() -> tuple[Bot, Dispatcher]:
       await q.answer()
       return
 
-    if data == "kw:include":
-      await state.set_state(AddRemoveFlow.waiting_include_kw)
-      await q.message.answer(t(lang, "send_kw_include"))
+    if data in ("kw:include", "kw:exclude", "kw:noise") or data.startswith("kw:include:") or data.startswith("kw:exclude:") or data.startswith("kw:noise:"):
+      parts = data.split(":")
+      mode = parts[1]
+      action = parts[2] if len(parts) >= 3 else "set"
+      await state.update_data(kw_action=action)
+      if mode == "include":
+        await state.set_state(AddRemoveFlow.waiting_include_kw)
+        await q.message.answer(
+          f"{t(lang, 'send_kw_include')}\n{t(lang, 'kw_action_hint').format(action=action)}"
+        )
+      elif mode == "exclude":
+        await state.set_state(AddRemoveFlow.waiting_exclude_kw)
+        await q.message.answer(
+          f"{t(lang, 'send_kw_exclude')}\n{t(lang, 'kw_action_hint').format(action=action)}"
+        )
+      else:
+        await state.set_state(AddRemoveFlow.waiting_noise_kw)
+        await q.message.answer(
+          f"{t(lang, 'send_kw_noise')}\n{t(lang, 'kw_action_hint').format(action=action)}"
+        )
       await q.answer()
       return
 
-    if data == "kw:exclude":
-      await state.set_state(AddRemoveFlow.waiting_exclude_kw)
-      await q.message.answer(t(lang, "send_kw_exclude"))
+    if data == "kw:show":
+      await q.message.answer(
+        _menu_view_text(user_id, lang, "keywords"),
+        reply_markup=menu_kb(hourly_on, daily_on, lang, view="keywords"),
+      )
       await q.answer()
       return
 
-    if data == "kw:noise":
-      await state.set_state(AddRemoveFlow.waiting_noise_kw)
-      await q.message.answer(t(lang, "send_kw_noise"))
+    if data == "kw:clearall":
+      db.set_keywords(user_id, include="", exclude="", noise="")
+      await q.message.answer(
+        _settings_result_text(user_id, lang, "keywords"),
+        reply_markup=menu_kb(hourly_on, daily_on, lang, view="keywords"),
+      )
       await q.answer()
       return
 
@@ -1418,7 +1479,11 @@ def make_bot_and_dp() -> tuple[Bot, Dispatcher]:
   async def set_inc_kw_flow(m: Message, state: FSMContext):
     lang = db.get_lang(m.from_user.id)
     txt = (m.text or "").strip()
-    db.set_keywords(m.from_user.id, include=txt if txt else "")
+    st = await state.get_data()
+    action = str(st.get("kw_action", "set"))
+    s = db.get_user_settings(m.from_user.id)
+    cur = str(s.get("include_keywords") or "")
+    db.set_keywords(m.from_user.id, include=mutate_keyword_csv(cur, action, txt if txt else ""))
     await state.clear()
     hourly_on, daily_on = db.get_user_flags(m.from_user.id)
     await m.answer(_settings_result_text(m.from_user.id, lang, "keywords"), reply_markup=menu_kb(hourly_on, daily_on, lang, view="keywords"))
@@ -1427,7 +1492,11 @@ def make_bot_and_dp() -> tuple[Bot, Dispatcher]:
   async def set_exc_kw_flow(m: Message, state: FSMContext):
     lang = db.get_lang(m.from_user.id)
     txt = (m.text or "").strip()
-    db.set_keywords(m.from_user.id, exclude=txt if txt else "")
+    st = await state.get_data()
+    action = str(st.get("kw_action", "set"))
+    s = db.get_user_settings(m.from_user.id)
+    cur = str(s.get("exclude_keywords") or "")
+    db.set_keywords(m.from_user.id, exclude=mutate_keyword_csv(cur, action, txt if txt else ""))
     await state.clear()
     hourly_on, daily_on = db.get_user_flags(m.from_user.id)
     await m.answer(_settings_result_text(m.from_user.id, lang, "keywords"), reply_markup=menu_kb(hourly_on, daily_on, lang, view="keywords"))
@@ -1436,7 +1505,11 @@ def make_bot_and_dp() -> tuple[Bot, Dispatcher]:
   async def set_noise_kw_flow(m: Message, state: FSMContext):
     lang = db.get_lang(m.from_user.id)
     txt = (m.text or "").strip()
-    db.set_keywords(m.from_user.id, noise=txt if txt else "")
+    st = await state.get_data()
+    action = str(st.get("kw_action", "set"))
+    s = db.get_user_settings(m.from_user.id)
+    cur = str(s.get("noise_keywords") or "")
+    db.set_keywords(m.from_user.id, noise=mutate_keyword_csv(cur, action, txt if txt else ""))
     await state.clear()
     hourly_on, daily_on = db.get_user_flags(m.from_user.id)
     await m.answer(_settings_result_text(m.from_user.id, lang, "keywords"), reply_markup=menu_kb(hourly_on, daily_on, lang, view="keywords"))

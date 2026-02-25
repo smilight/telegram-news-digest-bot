@@ -13,8 +13,8 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 
 from . import db
 from .i18n import t
+from .text_utils import mutate_keyword_csv, normalize_text
 from .tz_utils import canonical_tz_name
-from .text_utils import normalize_text
 
 CATEGORY_KEYWORDS = {
   "drones": ["шахед", "shahed", "дрон", "бпла", "uav"],
@@ -513,15 +513,49 @@ async def monitor_command(message: Message, args: str, parse_channel_ref):
     return
 
   if cmd == "include":
-    val = " ".join(parts[1:]).strip()
-    db.set_monitoring_params(uid, include_keywords=val)
-    await message.answer(t(lang, "saved"))
+    action = "set"
+    payload = ""
+    if len(parts) >= 2 and parts[1].lower() in ("set", "add", "rm", "clear", "show"):
+      action = parts[1].lower()
+      payload = " ".join(parts[2:]).strip() if len(parts) >= 3 else ""
+    else:
+      payload = " ".join(parts[1:]).strip()
+    s = db.get_user_settings(uid)
+    cur = str(s.get("monitor_include_keywords") or "")
+    try:
+      upd = mutate_keyword_csv(cur, action, payload)
+    except Exception:
+      await message.answer(t(lang, "monitor_format"))
+      return
+    if action != "show":
+      db.set_monitoring_params(uid, include_keywords=upd)
+    s2 = db.get_user_settings(uid)
+    inc = (s2.get("monitor_include_keywords") or "").strip() or "-"
+    exc = (s2.get("monitor_exclude_keywords") or "").strip() or "-"
+    await message.answer(f"{t(lang, 'saved')}\ninclude={inc}\nexclude={exc}")
     return
 
   if cmd == "exclude":
-    val = " ".join(parts[1:]).strip()
-    db.set_monitoring_params(uid, exclude_keywords=val)
-    await message.answer(t(lang, "saved"))
+    action = "set"
+    payload = ""
+    if len(parts) >= 2 and parts[1].lower() in ("set", "add", "rm", "clear", "show"):
+      action = parts[1].lower()
+      payload = " ".join(parts[2:]).strip() if len(parts) >= 3 else ""
+    else:
+      payload = " ".join(parts[1:]).strip()
+    s = db.get_user_settings(uid)
+    cur = str(s.get("monitor_exclude_keywords") or "")
+    try:
+      upd = mutate_keyword_csv(cur, action, payload)
+    except Exception:
+      await message.answer(t(lang, "monitor_format"))
+      return
+    if action != "show":
+      db.set_monitoring_params(uid, exclude_keywords=upd)
+    s2 = db.get_user_settings(uid)
+    inc = (s2.get("monitor_include_keywords") or "").strip() or "-"
+    exc = (s2.get("monitor_exclude_keywords") or "").strip() or "-"
+    await message.answer(f"{t(lang, 'saved')}\ninclude={inc}\nexclude={exc}")
     return
 
   if cmd == "categories" and len(parts) >= 2:

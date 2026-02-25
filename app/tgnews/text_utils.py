@@ -1,6 +1,7 @@
 from __future__ import annotations
 import re
 import hashlib
+from typing import List
 from urllib.parse import urlparse, parse_qsl, urlencode, urlunparse
 
 PROMO_PATTERNS = [
@@ -65,3 +66,54 @@ def normalize_text(text: str) -> str:
 
 def norm_hash(text: str) -> str:
   return hashlib.sha256(text.encode("utf-8", errors="ignore")).hexdigest()
+
+
+def parse_keyword_items(raw: str | None) -> List[str]:
+  s = str(raw or "").strip()
+  if not s:
+    return []
+  if any(ch in s for ch in [",", ";", "\n"]):
+    parts = re.split(r"[,;\n]+", s)
+  else:
+    parts = [s]
+  out: List[str] = []
+  seen = set()
+  for part in parts:
+    kw = " ".join(str(part).strip().lower().split())
+    if not kw or kw in seen:
+      continue
+    seen.add(kw)
+    out.append(kw)
+  return out
+
+
+def keyword_items_to_csv(items: List[str]) -> str:
+  out: List[str] = []
+  seen = set()
+  for it in items:
+    kw = " ".join(str(it).strip().lower().split())
+    if not kw or kw in seen:
+      continue
+    seen.add(kw)
+    out.append(kw)
+  return ", ".join(out)
+
+
+def mutate_keyword_csv(current: str | None, action: str, payload: str | None = None) -> str:
+  cur = parse_keyword_items(current)
+  op = str(action or "").strip().lower()
+  if op == "show":
+    return keyword_items_to_csv(cur)
+  if op == "clear":
+    return ""
+  if op not in ("set", "add", "rm"):
+    raise ValueError("invalid keyword action")
+
+  values = parse_keyword_items(payload)
+  if op == "set":
+    return keyword_items_to_csv(values)
+  if op == "add":
+    return keyword_items_to_csv(cur + values)
+
+  rm = set(values)
+  return keyword_items_to_csv([x for x in cur if x not in rm])

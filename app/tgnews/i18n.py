@@ -49,6 +49,14 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "kw_include": "🏷 Include topics",
     "kw_exclude": "🚫 Exclude topics",
     "kw_noise": "🧹 Noise/ads words",
+    "kw_include_add_btn": "➕ Include",
+    "kw_include_rm_btn": "➖ Include",
+    "kw_exclude_add_btn": "➕ Exclude",
+    "kw_exclude_rm_btn": "➖ Exclude",
+    "kw_noise_add_btn": "➕ Noise",
+    "kw_noise_rm_btn": "➖ Noise",
+    "kw_show_btn": "👁 Show lists",
+    "kw_clear_all_btn": "🧹 Clear all",
     "kw_help": "❓ Keyword help",
     "lang": "🌐 Language",
     "lang_prompt": "Choose language:",
@@ -56,6 +64,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "send_kw_include": "Send include keywords comma-separated (empty = clear).",
     "send_kw_exclude": "Send exclude keywords comma-separated (empty = clear).",
     "send_kw_noise": "Send noise/ads words comma-separated (empty = clear).",
+    "kw_action_hint": "Action: {action}.",
     "send_quiet_range": "Send quiet range: HH:MM HH:MM (example: 23:00 07:00).",
     "waiting_channel": "Send channel username (e.g. @channel) or link.",
     "added_to_hourly": "✅ Added to Hourly list: {ch}",
@@ -135,7 +144,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
       "• /daily on|off\n"
       "• /breaking on|off\n"
       "• /originals on|off\n"
-      "• /kw include a,b or /kw exclude a,b or /kw noise ad,promo\n"
+      "• /kw include|exclude|noise set|add|rm|clear|show <a,b>\n"
       "• /set daily_time 09:00 or /set hourly_minute 5\n"
       "• /tz Europe/Kyiv\n"
       "• /quiet on 23:00 07:00 | /quiet off\n"
@@ -155,11 +164,11 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "daily_format": "Format: /daily on or /daily off",
     "breaking_format": "Format: /breaking on or /breaking off",
     "originals_format": "Format: /originals on or /originals off",
-    "kw_format": "Format:\n/kw include kw1,kw2\n/kw exclude kw1,kw2\n/kw noise ad,promo",
+    "kw_format": "Format:\n/kw include|exclude|noise set kw1,kw2\n/kw include|exclude|noise add kw3\n/kw include|exclude|noise rm kw2\n/kw include|exclude|noise clear\n/kw include|exclude|noise show",
     "include_set": "🏷 Include keywords updated.",
     "exclude_set": "🚫 Exclude keywords updated.",
     "noise_set": "🧹 Noise/ads keywords updated.",
-    "kw_help_text": "Include = what must be present, Exclude = what must be hidden, Noise = ad/junk words to drop from digest.",
+    "kw_help_text": "Include = must contain, Exclude = must hide, Noise = ad/junk. Use set/add/rm/clear/show.",
     "set_format": "Format:\n/set daily_time 09:00\n/set hourly_minute 5",
     "set_unknown": "Unknown key. Available: daily_time, hourly_minute",
     "tz_invalid": "Invalid timezone. Example: Europe/Kyiv",
@@ -199,7 +208,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "monitor_enabled": "✅ Monitoring enabled.",
     "monitor_disabled": "🔕 Monitoring disabled.",
     "monitor_paused": "⏸ Monitoring paused for {mins} min.",
-    "monitor_format": "Format: /monitor on|off|add <channel>|rm <channel>|interval <1..30>|include <words>|exclude <words>|categories <all|drones,missiles,...>|pause <min>|now [period]",
+    "monitor_format": "Format: /monitor on|off|add <channel>|rm <channel>|interval <1..30>|include set|add|rm|clear|show <words>|exclude set|add|rm|clear|show <words>|categories <all|drones,missiles,...>|pause <min>|now [period]",
     "monitor_interval_set": "✅ Monitoring interval: {mins} min.",
     "monitor_antiflood_set": "✅ Monitoring anti-flood: {mins} min.",
     "monitor_report_format": "Format: /mreport <period>, examples: 1h, 24h, 90m, 2d",
@@ -274,6 +283,14 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "kw_include": "🏷 Включити теми",
     "kw_exclude": "🚫 Виключити теми",
     "kw_noise": "🧹 Шум/реклама",
+    "kw_include_add_btn": "➕ Включити",
+    "kw_include_rm_btn": "➖ Включити",
+    "kw_exclude_add_btn": "➕ Виключити",
+    "kw_exclude_rm_btn": "➖ Виключити",
+    "kw_noise_add_btn": "➕ Шум",
+    "kw_noise_rm_btn": "➖ Шум",
+    "kw_show_btn": "👁 Показати списки",
+    "kw_clear_all_btn": "🧹 Очистити все",
     "kw_help": "❓ Пояснення",
     "lang": "🌐 Мова",
     "lang_prompt": "Обери мову:",
@@ -281,6 +298,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "send_kw_include": "Надішли ключові слова через кому (порожньо = очистити).",
     "send_kw_exclude": "Надішли стоп-слова через кому (порожньо = очистити).",
     "send_kw_noise": "Надішли слова шуму/реклами через кому (порожньо = очистити).",
+    "kw_action_hint": "Дія: {action}.",
     "send_quiet_range": "Надішли тихий діапазон: HH:MM HH:MM (приклад: 23:00 07:00).",
     "waiting_channel": "Надішли канал (@username) або посилання t.me.",
     "added_to_hourly": "✅ Додано в погодинний список: {ch}",
@@ -360,7 +378,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
       "• /daily on|off\n"
       "• /breaking on|off\n"
       "• /originals on|off\n"
-      "• /kw include a,b або /kw exclude a,b або /kw noise ad,promo\n"
+      "• /kw include|exclude|noise set|add|rm|clear|show <a,b>\n"
       "• /set daily_time 09:00 або /set hourly_minute 5\n"
       "• /tz Europe/Kyiv\n"
       "• /quiet on 23:00 07:00 | /quiet off\n"
@@ -380,11 +398,11 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "daily_format": "Формат: /daily on або /daily off",
     "breaking_format": "Формат: /breaking on або /breaking off",
     "originals_format": "Формат: /originals on або /originals off",
-    "kw_format": "Формат:\n/kw include ключ1,ключ2\n/kw exclude ключ1,ключ2\n/kw noise ad,promo",
+    "kw_format": "Формат:\n/kw include|exclude|noise set ключ1,ключ2\n/kw include|exclude|noise add ключ3\n/kw include|exclude|noise rm ключ2\n/kw include|exclude|noise clear\n/kw include|exclude|noise show",
     "include_set": "🏷 Ключові слова include оновлено.",
     "exclude_set": "🚫 Ключові слова exclude оновлено.",
     "noise_set": "🧹 Ключові слова шуму/реклами оновлено.",
-    "kw_help_text": "Include = що має бути в пості, Exclude = що приховати, Noise = рекламні/сміттєві слова для відсіву.",
+    "kw_help_text": "Include = має містити, Exclude = приховати, Noise = рекламні/сміттєві. Використовуй set/add/rm/clear/show.",
     "set_format": "Формат:\n/set daily_time 09:00\n/set hourly_minute 5",
     "set_unknown": "Невідомий ключ. Доступно: daily_time, hourly_minute",
     "tz_invalid": "Невірний timezone. Приклад: Europe/Kyiv",
@@ -424,7 +442,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "monitor_enabled": "✅ Моніторинг увімкнено.",
     "monitor_disabled": "🔕 Моніторинг вимкнено.",
     "monitor_paused": "⏸ Моніторинг на паузі на {mins} хв.",
-    "monitor_format": "Формат: /monitor on|off|add <channel>|rm <channel>|interval <1..30>|include <слова>|exclude <слова>|categories <all|drones,missiles,...>|pause <хв>|now [період]",
+    "monitor_format": "Формат: /monitor on|off|add <channel>|rm <channel>|interval <1..30>|include set|add|rm|clear|show <слова>|exclude set|add|rm|clear|show <слова>|categories <all|drones,missiles,...>|pause <хв>|now [період]",
     "monitor_interval_set": "✅ Інтервал моніторингу: {mins} хв.",
     "monitor_antiflood_set": "✅ Антифлуд моніторингу: {mins} хв.",
     "monitor_report_format": "Формат: /mreport <період>, приклади: 1h, 24h, 90m, 2d",
@@ -499,6 +517,14 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "kw_include": "🏷 Включить темы",
     "kw_exclude": "🚫 Исключить темы",
     "kw_noise": "🧹 Шум/реклама",
+    "kw_include_add_btn": "➕ Включить",
+    "kw_include_rm_btn": "➖ Включить",
+    "kw_exclude_add_btn": "➕ Исключить",
+    "kw_exclude_rm_btn": "➖ Исключить",
+    "kw_noise_add_btn": "➕ Шум",
+    "kw_noise_rm_btn": "➖ Шум",
+    "kw_show_btn": "👁 Показать списки",
+    "kw_clear_all_btn": "🧹 Очистить все",
     "kw_help": "❓ Пояснение",
     "lang": "🌐 Язык",
     "lang_prompt": "Выбери язык:",
@@ -506,6 +532,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "send_kw_include": "Пришли ключевые слова через запятую (пусто = очистить).",
     "send_kw_exclude": "Пришли стоп-слова через запятую (пусто = очистить).",
     "send_kw_noise": "Пришли слова шума/рекламы через запятую (пусто = очистить).",
+    "kw_action_hint": "Действие: {action}.",
     "send_quiet_range": "Пришли тихий диапазон: HH:MM HH:MM (пример: 23:00 07:00).",
     "waiting_channel": "Пришли канал (@username) или ссылку t.me.",
     "added_to_hourly": "✅ Добавлено в почасовой список: {ch}",
@@ -585,7 +612,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
       "• /daily on|off\n"
       "• /breaking on|off\n"
       "• /originals on|off\n"
-      "• /kw include a,b или /kw exclude a,b или /kw noise ad,promo\n"
+      "• /kw include|exclude|noise set|add|rm|clear|show <a,b>\n"
       "• /set daily_time 09:00 или /set hourly_minute 5\n"
       "• /tz Europe/Kyiv\n"
       "• /quiet on 23:00 07:00 | /quiet off\n"
@@ -605,11 +632,11 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "daily_format": "Формат: /daily on или /daily off",
     "breaking_format": "Формат: /breaking on или /breaking off",
     "originals_format": "Формат: /originals on или /originals off",
-    "kw_format": "Формат:\n/kw include ключ1,ключ2\n/kw exclude ключ1,ключ2\n/kw noise ad,promo",
+    "kw_format": "Формат:\n/kw include|exclude|noise set ключ1,ключ2\n/kw include|exclude|noise add ключ3\n/kw include|exclude|noise rm ключ2\n/kw include|exclude|noise clear\n/kw include|exclude|noise show",
     "include_set": "🏷 Include keywords обновлены.",
     "exclude_set": "🚫 Exclude keywords обновлены.",
     "noise_set": "🧹 Ключевые слова шума/рекламы обновлены.",
-    "kw_help_text": "Include = что обязательно в посте, Exclude = что скрыть, Noise = рекламные/мусорные слова для отсева.",
+    "kw_help_text": "Include = должно содержать, Exclude = скрыть, Noise = рекламные/мусорные. Используй set/add/rm/clear/show.",
     "set_format": "Формат:\n/set daily_time 09:00\n/set hourly_minute 5",
     "set_unknown": "Неизвестный ключ. Доступно: daily_time, hourly_minute",
     "tz_invalid": "Неверный timezone. Пример: Europe/Kyiv",
@@ -649,7 +676,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "monitor_enabled": "✅ Мониторинг включен.",
     "monitor_disabled": "🔕 Мониторинг выключен.",
     "monitor_paused": "⏸ Мониторинг на паузе на {mins} мин.",
-    "monitor_format": "Формат: /monitor on|off|add <channel>|rm <channel>|interval <1..30>|include <слова>|exclude <слова>|categories <all|drones,missiles,...>|pause <мин>|now [период]",
+    "monitor_format": "Формат: /monitor on|off|add <channel>|rm <channel>|interval <1..30>|include set|add|rm|clear|show <слова>|exclude set|add|rm|clear|show <слова>|categories <all|drones,missiles,...>|pause <мин>|now [период]",
     "monitor_interval_set": "✅ Интервал мониторинга: {mins} мин.",
     "monitor_antiflood_set": "✅ Антифлуд мониторинга: {mins} мин.",
     "monitor_report_format": "Формат: /mreport <период>, примеры: 1h, 24h, 90m, 2d",
