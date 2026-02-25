@@ -2,6 +2,7 @@
 from __future__ import annotations
 import os
 import datetime as dt
+from difflib import SequenceMatcher
 from dataclasses import dataclass
 from zoneinfo import ZoneInfo
 from .semantic import embed_texts, match_clusters, DEDUP_MODE
@@ -87,14 +88,28 @@ class Cluster:
   rep: Dict
   items: List[Dict]
 
-def _cluster_simhash(posts: List[Dict], max_hamming: int = 6) -> List[Cluster]:
+def _cluster_simhash(posts: List[Dict], max_hamming: int = 8) -> List[Cluster]:
+  max_hamming = max(6, int(os.getenv("SIMHASH_MAX_HAMMING", str(max_hamming))))
+  text_ratio_threshold = float(os.getenv("TEXT_DEDUP_RATIO", "0.88"))
+  text_min_len = max(40, int(os.getenv("TEXT_DEDUP_MIN_LEN", "80")))
+
+  def _clean_text(p: Dict) -> str:
+    return normalize_text(_strip_media_lines(str(p.get("text", ""))))
+
+  def _ratio(a: str, b: str) -> float:
+    if not a or not b:
+      return 0.0
+    return SequenceMatcher(None, a, b).ratio()
+
   clusters: List[Cluster] = []
   posts_sorted = sorted(posts, key=lambda p: p["date_utc"], reverse=True)
   for p in posts_sorted:
+    p_clean = _clean_text(p)
     p_media_only = _is_media_only_text(str(p.get("text", "")))
     placed = False
     for c in clusters:
       c_media_only = _is_media_only_text(str(c.rep.get("text", "")))
+      c_clean = _clean_text(c.rep)
       if p["norm_hash"] == c.rep["norm_hash"]:
         c.items.append(p); placed = True; break
       # Avoid fuzzy merging for media-only posts (photo/video-only messages).
@@ -102,11 +117,16 @@ def _cluster_simhash(posts: List[Dict], max_hamming: int = 6) -> List[Cluster]:
         continue
       if hamming(int(p["simhash"]), int(c.rep["simhash"])) <= max_hamming:
         c.items.append(p); placed = True; break
+      # Fallback for paraphrased reposts when simhash misses.
+      if len(p_clean) >= text_min_len and len(c_clean) >= text_min_len and _ratio(p_clean, c_clean) >= text_ratio_threshold:
+        c.items.append(p); placed = True; break
     if not placed:
       clusters.append(Cluster(rep=p, items=[p]))
   return clusters
 
 def _cluster_embeddings(posts: List[Dict], threshold: float = 0.90) -> List[Cluster]:
+  threshold = float(os.getenv("EMBEDDING_CLUSTER_THRESHOLD", str(threshold)))
+  threshold = max(0.70, min(0.98, threshold))
   # Lazy import: optional dependency
   try:
     from .embeddings import embed, cosine
@@ -167,28 +187,14 @@ def rank_clusters(clusters: List[Cluster]) -> List[Cluster]:
 
 
 def _cluster_summary(c: Cluster, lang: str) -> str:
-  texts = []
   rep = _pretty_media_tags(normalize_text(_strip_media_lines(c.rep.get("text", ""))))
-  if rep:
-    texts.append(first_sentence(rep, limit=180))
-  for it in c.items[:4]:
-    txt = _pretty_media_tags(normalize_text(_strip_media_lines(it.get("text", ""))))
-    if not txt:
-      continue
-    sent = first_sentence(txt, limit=120)
-    if sent and sent not in texts:
-      texts.append(sent)
-    if len(texts) >= 2:
-      break
-  if not texts:
+  if not rep:
     return t(lang, "digest_no_text")
-  if len(texts) == 1:
-    return texts[0]
-  return f"{texts[0]} {t(lang, 'digest_then')} {texts[1]}"
+  return first_sentence(rep, limit=300)
 
 def format_digest(title: str, clusters: List[Cluster], top_k: int = 12, lang: str = "en", tzname: str = "UTC") -> str:
   clusters = rank_clusters(clusters)[:top_k]
-  lines = [f"🗞️ {title}", ""]
+  lines = [f"🗞️ {title}", "ℹ️ score = 3*src + posts + fresh", ""]
   if not clusters:
     lines.append(t(lang, "digest_empty"))
     return "\n".join(lines)
@@ -211,7 +217,8 @@ def format_digest(title: str, clusters: List[Cluster], top_k: int = 12, lang: st
     if rep_time:
       lines.append(f"🕒 {_fmt_local(rep_time, tzname, lang)}")
     importance = float(c.rep.get("_importance", 0.0))
-    lines.append(f"🧩 {sources_cnt}    📰 {len(c.items)}    ⭐ {importance:.1f}")
+    fresh = max(0.0, importance - (sources_cnt * 3.0 + len(c.items) * 1.0))
+    lines.append(f"🧩 src:{sources_cnt}    📰 posts:{len(c.items)}    ⏱ fresh:{fresh:.1f}    ⭐ score:{importance:.1f}")
     spread = cluster_spread(c, limit=6)
     if len(spread) > 1:
       lines.append(t(lang,'cluster_spread') + ": " + ", ".join(["@"+x for x in spread]))

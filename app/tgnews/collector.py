@@ -82,7 +82,17 @@ class Collector:
   async def fetch_new_for_channel(self, username: str):
     last_id = db.get_channel_last_msg_id(username)
     try:
-      msgs: List[Message] = await self.client.get_messages(username, limit=50, min_id=last_id)
+      # Catch up all unseen messages since last_id (important for busy channels).
+      msgs: List[Message] = []
+      async for m in self.client.iter_messages(username, min_id=last_id, reverse=True):
+        if not getattr(m, "id", None):
+          continue
+        if int(m.id) <= int(last_id):
+          continue
+        msgs.append(m)
+        # Hard safety cap per channel tick to avoid endless backlog in one pass.
+        if len(msgs) >= 1000:
+          break
     except FloodWaitError as e:
       await asyncio.sleep(e.seconds + 1)
       return
@@ -92,7 +102,7 @@ class Collector:
     if not msgs:
       return
 
-    msgs_sorted = sorted(msgs, key=lambda m: m.id)
+    msgs_sorted = sorted(msgs, key=lambda m: int(m.id))
     max_id = last_id
     for m in msgs_sorted:
       raw_text = (m.message or m.raw_text or "").strip()

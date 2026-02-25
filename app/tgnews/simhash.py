@@ -41,4 +41,8 @@ def to_uint64(x: int) -> int:
   return x & MASK64
 
 def hamming(a: int, b: int) -> int:
-  return (to_uint64(a) ^ to_uint64(b)).bit_count()
+  x = to_uint64(a) ^ to_uint64(b)
+  try:
+    return x.bit_count()
+  except Exception:
+    return bin(x).count("1")

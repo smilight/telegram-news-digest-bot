@@ -19,6 +19,8 @@ from .tz_utils import canonical_tz_name
 TZ = canonical_tz_name(os.getenv("TZ", "UTC"), fallback_to_env=False)
 DB_RETENTION_DAYS = int(os.getenv("DB_RETENTION_DAYS", "60"))
 DB_CLEANUP_EVERY_MIN = int(os.getenv("DB_CLEANUP_EVERY_MIN", "60"))
+DIGEST_HOURLY_WINDOW_MIN = max(60, int(os.getenv("DIGEST_HOURLY_WINDOW_MIN", "95")))
+DIGEST_DAILY_WINDOW_HOURS = max(24, int(os.getenv("DIGEST_DAILY_WINDOW_HOURS", "26")))
 logger = logging.getLogger(__name__)
 
 
@@ -224,7 +226,14 @@ def setup_scheduler(bot):
         if local_now.minute < target_min:
           continue
         lang = db.get_lang(uid)
-        await send_digest(bot, uid, dt.timedelta(hours=1), top_k=8, title_prefix=t(lang, "hourly_digest"), scope="hourly")
+        await send_digest(
+          bot,
+          uid,
+          dt.timedelta(minutes=DIGEST_HOURLY_WINDOW_MIN),
+          top_k=8,
+          title_prefix=t(lang, "hourly_digest"),
+          scope="hourly",
+        )
         db.mark_hourly_sent(uid, hour_key)
         db.incr_metric("digests_hourly_sent", 1)
       except Exception:
@@ -243,7 +252,14 @@ def setup_scheduler(bot):
         if not _daily_time_reached(local_now, str(sch.get("daily_time", "09:00"))):
           continue
         lang = db.get_lang(uid)
-        await send_digest(bot, uid, dt.timedelta(hours=24), top_k=15, title_prefix=t(lang, "daily_digest"), scope="daily")
+        await send_digest(
+          bot,
+          uid,
+          dt.timedelta(hours=DIGEST_DAILY_WINDOW_HOURS),
+          top_k=15,
+          title_prefix=t(lang, "daily_digest"),
+          scope="daily",
+        )
         db.mark_daily_sent(uid, today_key)
         db.incr_metric("digests_daily_sent", 1)
       except Exception:

@@ -120,6 +120,12 @@ python -m tgnews.main
 | `DIGEST_MEDIA_PREVIEW_MAX` | Number of media preview links sent after digest |
 | `DB_RETENTION_DAYS` | How many days to keep posts/alerts |
 | `DB_CLEANUP_EVERY_MIN` | Cleanup interval in minutes |
+| `DIGEST_HOURLY_WINDOW_MIN` | Hourly digest lookback window (default `95`) |
+| `DIGEST_DAILY_WINDOW_HOURS` | Daily digest lookback window (default `26`) |
+| `SIMHASH_MAX_HAMMING` | Simhash fuzzy dedup distance (default `8`) |
+| `TEXT_DEDUP_RATIO` | Text similarity fallback threshold (default `0.88`) |
+| `TEXT_DEDUP_MIN_LEN` | Min text length for similarity fallback (default `80`) |
+| `EMBEDDING_CLUSTER_THRESHOLD` | Embedding cosine threshold for clustering (default `0.84`) |
 | `COLLECTOR_POLL_SECONDS` | Collector polling interval |
 | `TZ` | Scheduler timezone (global fallback, example: `Europe/Kyiv`) |
 
