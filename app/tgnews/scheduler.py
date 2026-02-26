@@ -21,6 +21,7 @@ DB_RETENTION_DAYS = int(os.getenv("DB_RETENTION_DAYS", "60"))
 DB_CLEANUP_EVERY_MIN = int(os.getenv("DB_CLEANUP_EVERY_MIN", "60"))
 DIGEST_HOURLY_WINDOW_MIN = max(60, int(os.getenv("DIGEST_HOURLY_WINDOW_MIN", "95")))
 DIGEST_DAILY_WINDOW_HOURS = max(24, int(os.getenv("DIGEST_DAILY_WINDOW_HOURS", "26")))
+QUIET_CATCHUP_MAX_HOURS = max(1, int(os.getenv("QUIET_CATCHUP_MAX_HOURS", "12")))
 logger = logging.getLogger(__name__)
 
 
@@ -146,7 +147,7 @@ async def _run_breaking(bot):
 
   for uid in uids:
     s = settings_by_uid[uid]
-    local_now = _user_local_now(str(s.get("timezone", "UTC")))
+    local_now = _user_local_now(_effective_tz_name(str(s.get("timezone", "UTC"))))
     if _in_quiet_hours(s, local_now):
       continue
     lang = db.get_lang(uid)
@@ -225,11 +226,23 @@ def setup_scheduler(bot):
         # Send once in this hour when configured minute is reached (robust to restarts/lag).
         if local_now.minute < target_min:
           continue
+        gap_hours = 1
+        last_hour = str(sch.get("last_hourly_sent_hour") or "").strip()
+        if last_hour:
+          try:
+            lh = dt.datetime.strptime(last_hour, "%Y-%m-%dT%H").replace(tzinfo=local_now.tzinfo)
+            curh = local_now.replace(minute=0, second=0, microsecond=0)
+            raw_gap = int((curh - lh).total_seconds() // 3600)
+            if raw_gap > 1:
+              gap_hours = min(QUIET_CATCHUP_MAX_HOURS, raw_gap)
+          except Exception:
+            gap_hours = 1
+        lookback_min = max(DIGEST_HOURLY_WINDOW_MIN, gap_hours * 60 + 5)
         lang = db.get_lang(uid)
         await send_digest(
           bot,
           uid,
-          dt.timedelta(minutes=DIGEST_HOURLY_WINDOW_MIN),
+          dt.timedelta(minutes=lookback_min),
           top_k=8,
           title_prefix=t(lang, "hourly_digest"),
           scope="hourly",

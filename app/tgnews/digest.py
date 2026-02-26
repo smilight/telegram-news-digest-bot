@@ -11,7 +11,7 @@ from .i18n import t
 from typing import List, Dict, Tuple
 
 from .simhash import hamming
-from .text_utils import normalize_text
+from .text_utils import normalize_text, parse_keyword_items
 
 DEDUP_MODE = os.getenv("DEDUP_MODE", "simhash").strip().lower()  # simhash | embeddings
 
@@ -168,7 +168,31 @@ def cluster_posts(posts: List[Dict]) -> List[Cluster]:
     return _cluster_embeddings(posts)
   return _cluster_simhash(posts)
 
-def rank_clusters(clusters: List[Cluster]) -> List[Cluster]:
+def _priority_bonus(c: Cluster, scope: str, priority_profiles: List[Dict[str, object]] | None) -> float:
+  if not priority_profiles:
+    return 0.0
+  txt = normalize_text(_strip_media_lines(str(c.rep.get("text", "")))).lower()
+  if not txt:
+    return 0.0
+  bonus = 0.0
+  for p in priority_profiles:
+    if not bool(p.get("enabled", 1)):
+      continue
+    ps = str(p.get("scope", "all"))
+    if ps != "all" and ps != scope:
+      continue
+    kws = parse_keyword_items(str(p.get("keywords") or ""))
+    if not kws:
+      continue
+    if any(k in txt for k in kws):
+      try:
+        bonus += float(p.get("weight", 2.0))
+      except Exception:
+        bonus += 2.0
+  return bonus
+
+
+def rank_clusters(clusters: List[Cluster], scope: str = "all", priority_profiles: List[Dict[str, object]] | None = None) -> List[Cluster]:
   def score(c: Cluster) -> Tuple[float, str]:
     # Importance = cross-source spread + volume + mild recency boost.
     sources = len({it.get("channel_username") for it in c.items if it.get("channel_username")})
@@ -180,8 +204,10 @@ def rank_clusters(clusters: List[Cluster]) -> List[Cluster]:
       recency_bonus = max(0.0, 3.0 - age_h / 2.0)
     except Exception:
       pass
-    importance = sources * 3.0 + volume * 1.0 + recency_bonus
+    priority_bonus = _priority_bonus(c, scope, priority_profiles)
+    importance = sources * 3.0 + volume * 1.0 + recency_bonus + priority_bonus
     c.rep["_importance"] = importance
+    c.rep["_priority_bonus"] = priority_bonus
     return (importance, c.rep["date_utc"])
   return sorted(clusters, key=score, reverse=True)
 
@@ -192,8 +218,16 @@ def _cluster_summary(c: Cluster, lang: str) -> str:
     return t(lang, "digest_no_text")
   return first_sentence(rep, limit=300)
 
-def format_digest(title: str, clusters: List[Cluster], top_k: int = 12, lang: str = "en", tzname: str = "UTC") -> str:
-  clusters = rank_clusters(clusters)[:top_k]
+def format_digest(
+  title: str,
+  clusters: List[Cluster],
+  top_k: int = 12,
+  lang: str = "en",
+  tzname: str = "UTC",
+  scope: str = "all",
+  priority_profiles: List[Dict[str, object]] | None = None,
+) -> str:
+  clusters = rank_clusters(clusters, scope=scope, priority_profiles=priority_profiles)[:top_k]
   lines = [f"🗞️ {title}", "ℹ️ score = 3*src + posts + fresh", ""]
   if not clusters:
     lines.append(t(lang, "digest_empty"))
@@ -218,7 +252,8 @@ def format_digest(title: str, clusters: List[Cluster], top_k: int = 12, lang: st
       lines.append(f"🕒 {_fmt_local(rep_time, tzname, lang)}")
     importance = float(c.rep.get("_importance", 0.0))
     fresh = max(0.0, importance - (sources_cnt * 3.0 + len(c.items) * 1.0))
-    lines.append(f"🧩 src:{sources_cnt}    📰 posts:{len(c.items)}    ⏱ fresh:{fresh:.1f}    ⭐ score:{importance:.1f}")
+    pb = float(c.rep.get("_priority_bonus", 0.0))
+    lines.append(f"🧩 src:{sources_cnt}    📰 posts:{len(c.items)}    ⏱ fresh:{fresh:.1f}    🎯 prio:{pb:.1f}    ⭐ score:{importance:.1f}")
     spread = cluster_spread(c, limit=6)
     if len(spread) > 1:
       lines.append(t(lang,'cluster_spread') + ": " + ", ".join(["@"+x for x in spread]))

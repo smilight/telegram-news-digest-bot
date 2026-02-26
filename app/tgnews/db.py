@@ -260,6 +260,18 @@ def _ensure_extra_tables(conn):
       added_at TEXT NOT NULL DEFAULT (datetime('now')),
       PRIMARY KEY (user_id, username)
     );
+
+    CREATE TABLE IF NOT EXISTS user_priority_profiles (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      keywords TEXT,
+      scope TEXT NOT NULL DEFAULT 'all' CHECK(scope IN ('hourly','daily','all')),
+      weight REAL NOT NULL DEFAULT 2.0,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(user_id, name)
+    );
   """)
 
 
@@ -445,8 +457,14 @@ def status_summary(user_id: int) -> Dict[str, object]:
       "WHERE uc.user_id=? AND p.date_utc >= ?",
       (user_id, since_24h),
     ).fetchone()["n"]
-    # last updated channel meta
-    last = conn.execute("SELECT username, last_msg_id, updated_at FROM channels ORDER BY updated_at DESC LIMIT 1").fetchone()
+    # last updated channel meta for this user's tracked channels only
+    last = conn.execute(
+      "SELECT c.username, c.last_msg_id, c.updated_at "
+      "FROM channels c "
+      "WHERE EXISTS (SELECT 1 FROM user_channels uc WHERE uc.user_id=? AND uc.username=c.username) "
+      "ORDER BY c.updated_at DESC LIMIT 1",
+      (user_id,),
+    ).fetchone()
     last_obj = dict(last) if last else None
   return {"hourly_channels": int(hc), "daily_channels": int(dc), "posts_24h": int(p24), "last_channel": last_obj}
 
@@ -686,6 +704,63 @@ def get_topic_profile(user_id: int, name: str) -> Optional[Dict[str, object]]:
       (int(user_id), name.strip().lower()),
     ).fetchone()
     return dict(row) if row else None
+
+
+def upsert_priority_profile(
+  user_id: int,
+  name: str,
+  keywords: str | None = None,
+  scope: str = "all",
+  weight: float = 2.0,
+  enabled: bool = True,
+):
+  if scope not in ("hourly", "daily", "all"):
+    raise ValueError("scope must be hourly, daily or all")
+  w = max(0.0, min(20.0, float(weight)))
+  with connect() as conn:
+    conn.execute(
+      "INSERT INTO user_priority_profiles(user_id, name, keywords, scope, weight, enabled) "
+      "VALUES (?,?,?,?,?,?) "
+      "ON CONFLICT(user_id, name) DO UPDATE SET "
+      "keywords=excluded.keywords, scope=excluded.scope, weight=excluded.weight, enabled=excluded.enabled",
+      (int(user_id), name.strip().lower(), keywords, scope, w, 1 if enabled else 0),
+    )
+
+
+def delete_priority_profile(user_id: int, name: str) -> int:
+  with connect() as conn:
+    cur = conn.execute(
+      "DELETE FROM user_priority_profiles WHERE user_id=? AND name=?",
+      (int(user_id), name.strip().lower()),
+    )
+    return int(cur.rowcount)
+
+
+def get_priority_profile(user_id: int, name: str) -> Optional[Dict[str, object]]:
+  with connect() as conn:
+    row = conn.execute(
+      "SELECT name, keywords, scope, weight, enabled "
+      "FROM user_priority_profiles WHERE user_id=? AND name=?",
+      (int(user_id), name.strip().lower()),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def list_priority_profiles(user_id: int, enabled_only: bool = False) -> List[Dict[str, object]]:
+  with connect() as conn:
+    if enabled_only:
+      rows = conn.execute(
+        "SELECT name, keywords, scope, weight, enabled FROM user_priority_profiles "
+        "WHERE user_id=? AND enabled=1 ORDER BY name",
+        (int(user_id),),
+      ).fetchall()
+    else:
+      rows = conn.execute(
+        "SELECT name, keywords, scope, weight, enabled FROM user_priority_profiles "
+        "WHERE user_id=? ORDER BY name",
+        (int(user_id),),
+      ).fetchall()
+    return [dict(r) for r in rows]
 
 
 def list_recent_channels_for_user(user_id: int, limit: int = 10) -> List[Dict[str, object]]:

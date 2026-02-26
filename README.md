@@ -126,6 +126,7 @@ python -m tgnews.main
 | `TEXT_DEDUP_RATIO` | Text similarity fallback threshold (default `0.88`) |
 | `TEXT_DEDUP_MIN_LEN` | Min text length for similarity fallback (default `80`) |
 | `EMBEDDING_CLUSTER_THRESHOLD` | Embedding cosine threshold for clustering (default `0.84`) |
+| `QUIET_CATCHUP_MAX_HOURS` | Max hourly catch-up window after quiet hours (default `12`) |
 | `COLLECTOR_POLL_SECONDS` | Collector polling interval |
 | `TZ` | Scheduler timezone (global fallback, example: `Europe/Kyiv`) |
 
@@ -162,6 +163,13 @@ python -m tgnews.main
 - `/topic off <name>`
 - `/topic del <name>`
 
+### Priority profiles
+- `/pprofile`
+- `/pprofile set <name> keywords=a,b scope=all|hourly|daily weight=3`
+- `/pprofile on <name>`
+- `/pprofile off <name>`
+- `/pprofile del <name>`
+
 ### Breaking and content filters
 - `/breaking on|off`
 - `/originals on|off`
@@ -185,6 +193,7 @@ python -m tgnews.main
 
 ## Scheduling behavior
 - Hourly digest: sends once per hour when configured minute is reached (robust to restarts/lag).
+- If quiet hours were active, hourly digest sends a catch-up window after quiet hours end.
 - Daily digest: sends once per day when configured daily time is reached (robust to restarts/lag).
 - Monitoring: sends periodically by interval elapsed since last slot.
 

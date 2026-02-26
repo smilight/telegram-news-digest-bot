@@ -18,6 +18,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "menu_keywords": "🏷 Keywords",
     "menu_quiet": "🌙 Quiet hours",
     "menu_topics": "🧩 Topics",
+    "menu_priority": "🎯 Priority",
     "menu_breaking": "🚨 Breaking",
     "menu_monitoring": "🛡 Monitoring",
     "sources_recent": "🕘 Recent sources",
@@ -100,6 +101,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "status_timezone": "• Timezone",
     "status_quiet": "• Quiet hours",
     "status_topics": "• Topic profiles",
+    "status_priority": "• Priority profiles",
     "status_include": "• Include",
     "status_exclude": "• Exclude",
     "status_noise": "• Noise/ads filter",
@@ -135,6 +137,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "cmd_now_desc": "Send digest now",
     "cmd_status_desc": "Show current status",
     "cmd_sources_desc": "Recent/top sources",
+    "cmd_pprofile_desc": "Priority profiles",
     "help_commands": (
       "Commands:\n"
       "• /add @channel hourly|daily\n"
@@ -149,6 +152,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
       "• /tz Europe/Kyiv\n"
       "• /quiet on 23:00 07:00 | /quiet off\n"
       "• /topic (list) | /topic set geopolitics include=war,ukraine exclude=ads scope=all\n"
+      "• /pprofile (list) | /pprofile set safety keywords=drone,missile scope=all weight=3\n"
       "• /sources recent | /sources top\n"
       "• /health\n"
       "• /monitor on|off|...|now [1h|1d] | /mreport 1h|24h|90m|2d\n"
@@ -185,6 +189,11 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "topic_help_btn": "❓ Topic help",
     "topic_help": "Example: /topic set security include=drone,missile exclude=ads scope=all | disable: /topic off security | delete: /topic del security",
     "topic_format": "Format: /topic set <name> include=a,b exclude=c,d scope=all|hourly|daily | /topic on <name> | /topic off <name> | /topic del <name>",
+    "priority_title": "🎯 Priority profiles:",
+    "priority_empty": "No priority profiles yet.\n\nUse: /pprofile set <name> keywords=a,b scope=all|hourly|daily weight=3",
+    "priority_not_found": "Priority profile not found.",
+    "priority_help": "Examples: /pprofile set safety keywords=drone,missile scope=all weight=3 | /pprofile on safety | /pprofile off safety | /pprofile del safety",
+    "priority_format": "Format: /pprofile set <name> keywords=a,b scope=all|hourly|daily weight=3 | /pprofile on <name> | /pprofile off <name> | /pprofile del <name>",
     "health_title": "🩺 Health",
     "monitor_title": "🛡 Monitoring",
     "monitor_empty": "No critical events in this window.",
@@ -252,6 +261,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "menu_keywords": "🏷 Ключові слова",
     "menu_quiet": "🌙 Тихі години",
     "menu_topics": "🧩 Теми",
+    "menu_priority": "🎯 Пріоритети",
     "menu_breaking": "🚨 Breaking",
     "menu_monitoring": "🛡 Моніторинг",
     "sources_recent": "🕘 Останні джерела",
@@ -334,6 +344,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "status_timezone": "• Часовий пояс",
     "status_quiet": "• Тихі години",
     "status_topics": "• Тема-профілі",
+    "status_priority": "• Пріоритетні профілі",
     "status_include": "• Включити",
     "status_exclude": "• Виключити",
     "status_noise": "• Фільтр шуму/реклами",
@@ -369,6 +380,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "cmd_now_desc": "Надіслати дайджест зараз",
     "cmd_status_desc": "Поточний статус",
     "cmd_sources_desc": "Останні/топ джерела",
+    "cmd_pprofile_desc": "Пріоритетні профілі",
     "help_commands": (
       "Команди:\n"
       "• /add @channel hourly|daily\n"
@@ -383,6 +395,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
       "• /tz Europe/Kyiv\n"
       "• /quiet on 23:00 07:00 | /quiet off\n"
       "• /topic (list) | /topic set geopolitics include=war,ukraine exclude=ads scope=all\n"
+      "• /pprofile (list) | /pprofile set safety keywords=drone,missile scope=all weight=3\n"
       "• /sources recent | /sources top\n"
       "• /health\n"
       "• /monitor on|off|...|now [1h|1d] | /mreport 1h|24h|90m|2d\n"
@@ -419,6 +432,11 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "topic_help_btn": "❓ Як керувати",
     "topic_help": "Приклад: /topic set security include=drone,missile exclude=ads scope=all | вимкнути: /topic off security | видалити: /topic del security",
     "topic_format": "Формат: /topic set <name> include=a,b exclude=c,d scope=all|hourly|daily | /topic on <name> | /topic off <name> | /topic del <name>",
+    "priority_title": "🎯 Пріоритетні профілі:",
+    "priority_empty": "Поки немає пріоритетних профілів.\n\nВикористай: /pprofile set <name> keywords=a,b scope=all|hourly|daily weight=3",
+    "priority_not_found": "Пріоритетний профіль не знайдено.",
+    "priority_help": "Приклади: /pprofile set safety keywords=drone,missile scope=all weight=3 | /pprofile on safety | /pprofile off safety | /pprofile del safety",
+    "priority_format": "Формат: /pprofile set <name> keywords=a,b scope=all|hourly|daily weight=3 | /pprofile on <name> | /pprofile off <name> | /pprofile del <name>",
     "health_title": "🩺 Health",
     "monitor_title": "🛡 Моніторинг",
     "monitor_empty": "У цьому вікні критичних подій не знайдено.",
@@ -486,6 +504,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "menu_keywords": "🏷 Ключевые слова",
     "menu_quiet": "🌙 Тихие часы",
     "menu_topics": "🧩 Темы",
+    "menu_priority": "🎯 Приоритеты",
     "menu_breaking": "🚨 Breaking",
     "menu_monitoring": "🛡 Мониторинг",
     "sources_recent": "🕘 Недавние источники",
@@ -568,6 +587,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "status_timezone": "• Часовой пояс",
     "status_quiet": "• Тихие часы",
     "status_topics": "• Тематические профили",
+    "status_priority": "• Приоритетные профили",
     "status_include": "• Включить",
     "status_exclude": "• Исключить",
     "status_noise": "• Фильтр шума/рекламы",
@@ -603,6 +623,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "cmd_now_desc": "Отправить дайджест сейчас",
     "cmd_status_desc": "Показать текущий статус",
     "cmd_sources_desc": "Недавние/топ источники",
+    "cmd_pprofile_desc": "Приоритетные профили",
     "help_commands": (
       "Команды:\n"
       "• /add @channel hourly|daily\n"
@@ -617,6 +638,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
       "• /tz Europe/Kyiv\n"
       "• /quiet on 23:00 07:00 | /quiet off\n"
       "• /topic (list) | /topic set geopolitics include=war,ukraine exclude=ads scope=all\n"
+      "• /pprofile (list) | /pprofile set safety keywords=drone,missile scope=all weight=3\n"
       "• /sources recent | /sources top\n"
       "• /health\n"
       "• /monitor on|off|...|now [1h|1d] | /mreport 1h|24h|90m|2d\n"
@@ -653,6 +675,11 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "topic_help_btn": "❓ Как управлять",
     "topic_help": "Пример: /topic set security include=drone,missile exclude=ads scope=all | выключить: /topic off security | удалить: /topic del security",
     "topic_format": "Формат: /topic set <name> include=a,b exclude=c,d scope=all|hourly|daily | /topic on <name> | /topic off <name> | /topic del <name>",
+    "priority_title": "🎯 Приоритетные профили:",
+    "priority_empty": "Пока нет приоритетных профилей.\n\nИспользуй: /pprofile set <name> keywords=a,b scope=all|hourly|daily weight=3",
+    "priority_not_found": "Приоритетный профиль не найден.",
+    "priority_help": "Примеры: /pprofile set safety keywords=drone,missile scope=all weight=3 | /pprofile on safety | /pprofile off safety | /pprofile del safety",
+    "priority_format": "Формат: /pprofile set <name> keywords=a,b scope=all|hourly|daily weight=3 | /pprofile on <name> | /pprofile off <name> | /pprofile del <name>",
     "health_title": "🩺 Health",
     "monitor_title": "🛡 Мониторинг",
     "monitor_empty": "В этом окне критичных событий не найдено.",

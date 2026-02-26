@@ -233,6 +233,7 @@ async def send_digest(
   )
 
   settings = db.get_user_settings(user_id)
+  priority_profiles = db.list_priority_profiles(user_id, enabled_only=True)
   if settings.get("originals_only"):
     posts = [p for p in posts if int(p.get("is_forward", 0)) == 0]
 
@@ -280,7 +281,15 @@ async def send_digest(
     tzname = "UTC"
     end_local = end.astimezone()
   title = f"{title_prefix} ({scope_title}) • {t(lang, 'for_hours').format(hours=hours)} • {_fmt_dt_human(end_local, lang)}"
-  text = format_digest(title, clusters, top_k=top_k, lang=lang, tzname=tzname)
+  text = format_digest(
+    title,
+    clusters,
+    top_k=top_k,
+    lang=lang,
+    tzname=tzname,
+    scope=scope,
+    priority_profiles=priority_profiles,
+  )
   db.incr_metric("digests_generated", 1)
 
   if len(text) <= 3800:
@@ -349,6 +358,8 @@ def menu_kb(hourly_on: bool, daily_on: bool, lang: str = "en", view: str = "main
     kb.button(text=t(lang, "menu_schedule"), callback_data="nav:schedule")
     kb.button(text=t(lang, "menu_keywords"), callback_data="nav:keywords")
     kb.adjust(2)
+    kb.button(text=t(lang, "menu_priority"), callback_data="nav:priority")
+    kb.adjust(1)
     kb.button(text=t(lang, "menu_quiet"), callback_data="nav:quiet")
     kb.button(text=t(lang, "menu_topics"), callback_data="nav:topics")
     kb.adjust(2)
@@ -395,6 +406,11 @@ def menu_kb(hourly_on: bool, daily_on: bool, lang: str = "en", view: str = "main
     kb.button(text=t(lang, "topic_list_btn"), callback_data="topic:list")
     kb.button(text=t(lang, "topic_help_btn"), callback_data="topic:help")
     kb.adjust(2)
+    kb.button(text=t(lang, "menu_back"), callback_data="nav:settings")
+    kb.adjust(1)
+  elif view == "priority":
+    kb.button(text=t(lang, "status_refresh"), callback_data="nav:priority")
+    kb.adjust(1)
     kb.button(text=t(lang, "menu_back"), callback_data="nav:settings")
     kb.adjust(1)
   elif view == "breaking":
@@ -500,6 +516,9 @@ def _status_text(user_id: int, lang: str, hourly_on: bool, daily_on: bool) -> st
   topics = db.list_topic_profiles(user_id)
   if topics:
     txt += f"{t(lang, 'status_topics')}: {len(topics)}\n"
+  pps = db.list_priority_profiles(user_id, enabled_only=False)
+  if pps:
+    txt += f"{t(lang, 'status_priority')}: {len(pps)}\n"
 
   spam = db.list_top_spammy_channels(6)
   if spam:
@@ -581,6 +600,20 @@ def _menu_view_text(user_id: int, lang: str, view: str) -> str:
     return t(lang, "menu_desc_digest")
   if view == "settings":
     return t(lang, "menu_desc_settings")
+  if view == "priority":
+    items = db.list_priority_profiles(user_id, enabled_only=False)
+    if not items:
+      return t(lang, "priority_empty")
+    lines = [t(lang, "priority_title")]
+    for it in items:
+      kws = (it.get("keywords") or "").strip() or "-"
+      lines.append(
+        f"• {it['name']} [{it.get('scope','all')}] w={float(it.get('weight', 2.0)):.1f} "
+        f"enabled={bool(it.get('enabled', 1))} kws=({kws})"
+      )
+    lines.append("")
+    lines.append(t(lang, "priority_help"))
+    return "\n".join(lines)
   if view == "schedule":
     sch = db.get_schedule(user_id)
     return (
@@ -668,6 +701,7 @@ async def _configure_telegram_chat_ui(bot: Bot, user_id: int, lang: str):
     BotCommand(command="now", description=t(lang, "cmd_now_desc")),
     BotCommand(command="status", description=t(lang, "cmd_status_desc")),
     BotCommand(command="sources", description=t(lang, "cmd_sources_desc")),
+    BotCommand(command="pprofile", description=t(lang, "cmd_pprofile_desc")),
   ]
   await bot.set_my_commands(commands=commands, scope=BotCommandScopeChat(chat_id=user_id))
 
@@ -1009,6 +1043,60 @@ def make_bot_and_dp() -> tuple[Bot, Dispatcher]:
       await m.answer(t(lang, "saved"))
       return
     await m.answer(t(lang, "topic_format"))
+
+  @dp.message(Command("pprofile"))
+  async def pprofile_cmd(m: Message, command: CommandObject):
+    lang = _ensure_user_and_lang(m.from_user.id, getattr(m.from_user, "language_code", None))
+    args = (command.args or "").strip()
+    if not args:
+      await m.answer(_menu_view_text(m.from_user.id, lang, "priority"))
+      return
+    parts = args.split(maxsplit=2)
+    action = parts[0].lower()
+    if action == "del" and len(parts) >= 2:
+      n = db.delete_priority_profile(m.from_user.id, parts[1])
+      await m.answer(t(lang, "saved") if n else t(lang, "priority_not_found"))
+      return
+    if action in ("on", "off") and len(parts) >= 2:
+      old = db.get_priority_profile(m.from_user.id, parts[1])
+      if not old:
+        await m.answer(t(lang, "priority_not_found"))
+        return
+      db.upsert_priority_profile(
+        m.from_user.id,
+        old["name"],
+        keywords=old.get("keywords"),
+        scope=str(old.get("scope", "all")),
+        weight=float(old.get("weight", 2.0)),
+        enabled=(action == "on"),
+      )
+      await m.answer(t(lang, "saved"))
+      return
+    if action == "set" and len(parts) == 3:
+      # /pprofile set security keywords=drone,missile scope=all weight=3
+      name = parts[1].strip().lower()
+      tail = parts[2]
+      kws = ""
+      scope = "all"
+      weight = 2.0
+      for token in tail.split():
+        low = token.lower()
+        if low.startswith("keywords="):
+          kws = token.split("=", 1)[1]
+        elif low.startswith("scope="):
+          scope = token.split("=", 1)[1].lower()
+        elif low.startswith("weight="):
+          try:
+            weight = float(token.split("=", 1)[1])
+          except Exception:
+            weight = 2.0
+      if scope not in ("hourly", "daily", "all"):
+        await m.answer(t(lang, "scope_format"))
+        return
+      db.upsert_priority_profile(m.from_user.id, name, keywords=kws, scope=scope, weight=weight, enabled=True)
+      await m.answer(t(lang, "saved"))
+      return
+    await m.answer(t(lang, "priority_format"))
 
   @dp.message(Command("health"))
   async def health_cmd(m: Message):
