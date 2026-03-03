@@ -818,11 +818,22 @@ def cleanup_old_data(retention_days: int) -> Dict[str, int]:
       "DELETE FROM muted_alerts WHERE muted_at < datetime('now', ?)",
       (f"-{days} days",),
     ).rowcount
-    conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    # TRUNCATE may require stronger lock and can fail under concurrent load.
+    # Fallback to PASSIVE and do not fail cleanup tick if checkpoint is busy.
+    checkpoint_mode = "TRUNCATE"
+    try:
+      conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    except sqlite3.OperationalError:
+      try:
+        conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
+        checkpoint_mode = "PASSIVE"
+      except sqlite3.OperationalError:
+        checkpoint_mode = "SKIPPED"
     return {
       "posts_deleted": int(posts or 0),
       "alerts_deleted": int(alerts or 0),
       "muted_deleted": int(muted or 0),
+      "checkpoint_mode": checkpoint_mode,
     }
 
 
